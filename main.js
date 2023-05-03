@@ -110,8 +110,7 @@ class ModuleInstance extends InstanceBase {
 						this.updateStatus(InstanceStatus.Ok)
 						this.switch.token = data.login.token
 						this.switch.tokenExpire = data.login.expire
-						console.log(this.switch.token)
-						console.log(this.switch.tokenExpire)
+
 						this.getSwitchInfo()
 						this.sendCommand('sw_portstats?portid=ALL', 'get')
 						this.startSwitchPoll()
@@ -137,12 +136,21 @@ class ModuleInstance extends InstanceBase {
 		this.switchPoll = setInterval(() => {
 			this.getSwitchInfo()
 		}, 1000)
+
+		//Token expires every 24hrs
+		this.tokenReAuth = setInterval(() => {
+			this.initConnection()
+		}, 24 * 60 * 60 * 1000)
 	}
 
 	stopSwitchPoll() {
 		if (this.switchPoll) {
 			clearInterval(this.switchPoll)
 			delete this.switchPoll
+		}
+		if (this.tokenReAuth) {
+			clearInterval(this.tokenReAuth)
+			delete this.tokenReAuth
 		}
 	}
 
@@ -185,7 +193,6 @@ class ModuleInstance extends InstanceBase {
 
 	processData(cmd, data) {
 		if (cmd.match('device_info')) {
-			console.log(data)
 			this.switch.deviceInfo = data.deviceInfo
 			let info = data.deviceInfo
 
@@ -196,7 +203,6 @@ class ModuleInstance extends InstanceBase {
 				uptime: info.upTime,
 			})
 		} else if (cmd.match('sw_portstats')) {
-			console.log(data)
 			if (data.switchStatsPort) {
 				let init = null
 				if (!this.switch.switchStatsPort) {

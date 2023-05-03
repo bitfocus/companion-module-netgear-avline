@@ -53,7 +53,7 @@ export function getActions() {
 			],
 			callback: (action) => {
 				let portInfo = this.switch?.poePortConfig?.find(({ portid }) => portid === action.options.port)
-				console.log(portInfo)
+
 				if (portInfo) {
 					let body = portInfo
 					body.reset = true
