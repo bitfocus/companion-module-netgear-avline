@@ -128,6 +128,7 @@ class ModuleInstance extends InstanceBase {
 	getSwitchInfo() {
 		this.sendCommand('device_info', 'get')
 		this.sendCommand('swcfg_poe?portid=ALL', 'get')
+		this.sendCommand('sw_portstats?portid=ALL', 'get')
 	}
 
 	startSwitchPoll() {
@@ -212,8 +213,17 @@ class ModuleInstance extends InstanceBase {
 				this.switch.switchStatsPort = data.switchStatsPort
 				this.checkFeedbacks('linkStatus')
 
+				let changedVars = {}
+				for (let x of this.switch.switchStatsPort) {
+					let id = this.switch.switchStatsPort[x].portId
+					changedVars[`port_${id}_speed`] = this.switch.switchStatsPort[x].speed
+				}
+
+				this.setVariableValues(changedVars)
+
 				if (init) {
 					this.initPresets()
+					this.initVariables()
 				}
 			}
 		} else if (cmd.match('swcfg_poe')) {
@@ -226,8 +236,18 @@ class ModuleInstance extends InstanceBase {
 				this.switch.poePortConfig = data.poePortConfig
 				this.checkFeedbacks('poeEnabled')
 
+				let changedVars = []
+				for (let x of this.switch.poePortConfig) {
+					let id = this.switch.poePortConfig[x].portid
+					changedVars[`port_${id}_poe_status`] = this.switch.switchStatsPort[x].status
+					changedVars[`port_${id}_poe_draw`] = this.switch.switchStatsPort[x].currentPower
+				}
+
+				this.setVariableValues(changedVars)
+
 				if (init) {
 					this.initPresets()
+					this.initVariables()
 				}
 			}
 		}
