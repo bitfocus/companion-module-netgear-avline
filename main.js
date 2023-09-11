@@ -205,49 +205,41 @@ class ModuleInstance extends InstanceBase {
 			})
 		} else if (cmd.match('sw_portstats')) {
 			if (data.switchStatsPort) {
-				let init = null
 				if (!this.switch.switchStatsPort) {
-					init = true
-				}
-
-				this.switch.switchStatsPort = data.switchStatsPort
-				this.checkFeedbacks('linkStatus')
-
-				let changedVars = {}
-				for (let x of this.switch.switchStatsPort) {
-					let id = this.switch.switchStatsPort[x].portId
-					changedVars[`port_${id}_speed`] = this.switch.switchStatsPort[x].speed
-				}
-
-				this.setVariableValues(changedVars)
-
-				if (init) {
+					this.switch.switchStatsPort = data.switchStatsPort
 					this.initPresets()
 					this.initVariables()
+				} else {
+					this.switch.switchStatsPort = data.switchStatsPort
+
+					this.checkFeedbacks('linkStatus')
+					let changedVars = {}
+					this.switch.switchStatsPort.forEach((port) => {
+						let id = port.portId
+						changedVars[`port_${id}_speed`] = port.speed
+					})
+
+					this.setVariableValues(changedVars)
 				}
 			}
 		} else if (cmd.match('swcfg_poe')) {
 			if (data.poePortConfig) {
-				let init = null
 				if (!this.switch.poePortConfig) {
-					init = true
-				}
-
-				this.switch.poePortConfig = data.poePortConfig
-				this.checkFeedbacks('poeEnabled')
-
-				let changedVars = []
-				for (let x of this.switch.poePortConfig) {
-					let id = this.switch.poePortConfig[x].portid
-					changedVars[`port_${id}_poe_status`] = this.switch.switchStatsPort[x].status
-					changedVars[`port_${id}_poe_draw`] = this.switch.switchStatsPort[x].currentPower
-				}
-
-				this.setVariableValues(changedVars)
-
-				if (init) {
+					this.switch.poePortConfig = data.poePortConfig
 					this.initPresets()
 					this.initVariables()
+				} else {
+					this.switch.poePortConfig = data.poePortConfig
+					this.checkFeedbacks('poeEnabled')
+
+					let changedVars = []
+					this.switch.poePortConfig.forEach((port) => {
+						let id = port.portid
+						changedVars[`port_${id}_poe_status`] = port.status
+						changedVars[`port_${id}_poe_draw`] = port.currentPower
+					})
+
+					this.setVariableValues(changedVars)
 				}
 			}
 		}

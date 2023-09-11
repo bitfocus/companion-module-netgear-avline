@@ -20,26 +20,27 @@ export function getVariables() {
 		name: 'Uptime',
 		variableId: 'uptime',
 	})
-
-	for (let x of this.switch.switchStatsPort) {
-		let id = this.switch.switchStatsPort[x].portId
-		variables.push({
-			name: `Port ${id} - Speed`,
-			variableId: `port_${id}_speed`,
+	if (this.switch.switchStatsPort) {
+		this.switch.switchStatsPort.forEach((port) => {
+			let id = port.portId
+			variables.push({
+				name: `Port ${id} - Speed`,
+				variableId: `port_${id}_speed`,
+			})
 		})
 	}
-
-	for (let x of this.switch.poePortConfig) {
-		let id = this.switch.poePortConfig[x].portid
-		variables.push({
-			name: `Port ${id} - POE Status`,
-			variableId: `port_${id}_poe_status`,
-		})
-		variables.push({
-			name: `Port ${id} - POE Draw`,
-			variableId: `port_${id}_poe_draw`,
+	if (this.switch.poePortConfig) {
+		this.switch.poePortConfig.forEach((port) => {
+			let id = port.portid
+			variables.push({
+				name: `Port ${id} - POE Status`,
+				variableId: `port_${id}_poe_status`,
+			})
+			variables.push({
+				name: `Port ${id} - POE Draw`,
+				variableId: `port_${id}_poe_draw`,
+			})
 		})
 	}
-
 	return variables
 }
