@@ -4,6 +4,7 @@ import { getPresets } from './presets.js'
 import { getVariables } from './variables.js'
 import { getFeedbacks } from './feedbacks.js'
 import { upgradeScripts } from './upgrades.js'
+import CONSTANTS from './constants.js'
 
 import fetch from 'node-fetch'
 import https from 'https'
@@ -213,12 +214,12 @@ class ModuleInstance extends InstanceBase {
 					this.switch.switchStatsPort = data.switchStatsPort
 
 					this.checkFeedbacks('linkStatus')
-					let changedVars = {}
+					/* let changedVars = {}
 					this.switch.switchStatsPort.forEach((port) => {
 						let id = port.portId
 						changedVars[`port_${id}_speed`] = port.speed
 					})
-
+ */
 					this.setVariableValues(changedVars)
 				}
 			}
@@ -235,8 +236,11 @@ class ModuleInstance extends InstanceBase {
 					let changedVars = []
 					this.switch.poePortConfig.forEach((port) => {
 						let id = port.portid
-						changedVars[`port_${id}_poe_status`] = port.status
-						changedVars[`port_${id}_poe_draw`] = port.currentPower
+						let poeStatus = CONSTANTS.poeStatusLevels[`${port.status}`]
+						let poePower = port.currentPower / 1000
+
+						changedVars[`port_${id}_poe_status`] = poeStatus
+						changedVars[`port_${id}_poe_current_power`] = `${poePower} W`
 					})
 
 					this.setVariableValues(changedVars)
