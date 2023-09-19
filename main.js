@@ -140,9 +140,12 @@ class ModuleInstance extends InstanceBase {
 		}, 1000)
 
 		//Token expires every 24hrs
-		this.tokenReAuth = setInterval(() => {
-			this.initConnection()
-		}, 24 * 60 * 60 * 1000)
+		this.tokenReAuth = setInterval(
+			() => {
+				this.initConnection()
+			},
+			24 * 60 * 60 * 1000,
+		)
 	}
 
 	stopSwitchPoll() {
@@ -214,12 +217,13 @@ class ModuleInstance extends InstanceBase {
 					this.switch.switchStatsPort = data.switchStatsPort
 
 					this.checkFeedbacks('linkStatus')
-					/* let changedVars = {}
+					let changedVars = {}
 					this.switch.switchStatsPort.forEach((port) => {
 						let id = port.portId
-						changedVars[`port_${id}_speed`] = port.speed
+						let portSpeed = CONSTANTS.speedStatusLevels[`${port.speed}`]
+						changedVars[`port_${id}_speed`] = portSpeed
 					})
- */
+
 					this.setVariableValues(changedVars)
 				}
 			}
