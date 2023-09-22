@@ -4,6 +4,7 @@ import { getPresets } from './presets.js'
 import { getVariables } from './variables.js'
 import { getFeedbacks } from './feedbacks.js'
 import { upgradeScripts } from './upgrades.js'
+import CONSTANTS from './constants.js'
 
 import fetch from 'node-fetch'
 import https from 'https'
@@ -128,6 +129,7 @@ class ModuleInstance extends InstanceBase {
 	getSwitchInfo() {
 		this.sendCommand('device_info', 'get')
 		this.sendCommand('swcfg_poe?portid=ALL', 'get')
+		this.sendCommand('sw_portstats?portid=ALL', 'get')
 	}
 
 	startSwitchPoll() {
@@ -204,30 +206,70 @@ class ModuleInstance extends InstanceBase {
 			})
 		} else if (cmd.match('sw_portstats')) {
 			if (data.switchStatsPort) {
-				let init = null
 				if (!this.switch.switchStatsPort) {
-					init = true
-				}
-
-				this.switch.switchStatsPort = data.switchStatsPort
-				this.checkFeedbacks('linkStatus')
-
-				if (init) {
+					this.switch.switchStatsPort = data.switchStatsPort
 					this.initPresets()
+					this.initVariables()
+					let changedVars = {}
+					data.switchStatsPort.forEach((port) => {
+						let id = port.portId
+						let portSpeed = CONSTANTS.speedStatusLevels[`${port.speed}`]
+						changedVars[`port_${id}_speed`] = portSpeed
+					})
+					this.setVariableValues(changedVars)
+					this.checkFeedbacks('linkStatus')
+				} else {
+					let changedVars = {}
+					data.switchStatsPort.forEach((port) => {
+						let id = port.portId
+						let oldPort = this.switch?.switchStatsPort?.find(({ portId }) => portId === port.portId)
+
+						if (!oldPort || oldPort?.speed !== port.speed) {
+							let portSpeed = CONSTANTS.speedStatusLevels[`${port.speed}`]
+							changedVars[`port_${id}_speed`] = portSpeed
+						}
+					})
+					this.switch.switchStatsPort = data.switchStatsPort
+					this.setVariableValues(changedVars)
+					this.checkFeedbacks('linkStatus')
 				}
 			}
 		} else if (cmd.match('swcfg_poe')) {
 			if (data.poePortConfig) {
-				let init = null
 				if (!this.switch.poePortConfig) {
-					init = true
-				}
-
-				this.switch.poePortConfig = data.poePortConfig
-				this.checkFeedbacks('poeEnabled')
-
-				if (init) {
+					this.switch.poePortConfig = data.poePortConfig
 					this.initPresets()
+					this.initVariables()
+					let changedVars = {}
+					data.poePortConfig.forEach((port) => {
+						let id = port.portid
+						let poeStatus = CONSTANTS.poeStatusLevels[`${port.status}`]
+						let poePower = port.currentPower / 1000
+
+						changedVars[`port_${id}_poe_status`] = poeStatus
+						changedVars[`port_${id}_poe_current_power`] = `${poePower} W`
+					})
+					this.setVariableValues(changedVars)
+					this.checkFeedbacks('poeEnabled')
+				} else {
+					let changedVars = {}
+					data.poePortConfig.forEach((port) => {
+						let id = port.portid
+						let poeStatus = CONSTANTS.poeStatusLevels[`${port.status}`]
+						let poePower = port.currentPower / 1000
+
+						let oldPort = this.switch.poePortConfig?.find(({ portId }) => portId === port.portId)
+
+						if (!oldPort || oldPort?.status !== port.status) {
+							changedVars[`port_${id}_poe_status`] = poeStatus
+						}
+						if (!oldPort || oldPort?.currentPower !== port.currentPower) {
+							changedVars[`port_${id}_poe_current_power`] = `${poePower} W`
+						}
+					})
+					this.switch.poePortConfig = data.poePortConfig
+					this.setVariableValues(changedVars)
+					this.checkFeedbacks('poeEnabled')
 				}
 			}
 		}
