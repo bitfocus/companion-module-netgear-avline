@@ -217,6 +217,7 @@ class ModuleInstance extends InstanceBase {
 						changedVars[`port_${id}_speed`] = portSpeed
 					})
 					this.setVariableValues(changedVars)
+					this.checkFeedbacks('linkStatus')
 				} else {
 					let changedVars = {}
 					data.switchStatsPort.forEach((port) => {
@@ -249,6 +250,7 @@ class ModuleInstance extends InstanceBase {
 						changedVars[`port_${id}_poe_current_power`] = `${poePower} W`
 					})
 					this.setVariableValues(changedVars)
+					this.checkFeedbacks('poeEnabled')
 				} else {
 					let changedVars = {}
 					data.poePortConfig.forEach((port) => {
