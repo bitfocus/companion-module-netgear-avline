@@ -140,12 +140,9 @@ class ModuleInstance extends InstanceBase {
 		}, 1000)
 
 		//Token expires every 24hrs
-		this.tokenReAuth = setInterval(
-			() => {
-				this.initConnection()
-			},
-			24 * 60 * 60 * 1000,
-		)
+		this.tokenReAuth = setInterval(() => {
+			this.initConnection()
+		}, 24 * 60 * 60 * 1000)
 	}
 
 	stopSwitchPoll() {
@@ -213,18 +210,27 @@ class ModuleInstance extends InstanceBase {
 					this.switch.switchStatsPort = data.switchStatsPort
 					this.initPresets()
 					this.initVariables()
-				} else {
-					this.switch.switchStatsPort = data.switchStatsPort
-
-					this.checkFeedbacks('linkStatus')
 					let changedVars = {}
-					this.switch.switchStatsPort.forEach((port) => {
+					data.switchStatsPort.forEach((port) => {
 						let id = port.portId
 						let portSpeed = CONSTANTS.speedStatusLevels[`${port.speed}`]
 						changedVars[`port_${id}_speed`] = portSpeed
 					})
-
 					this.setVariableValues(changedVars)
+				} else {
+					let changedVars = {}
+					data.switchStatsPort.forEach((port) => {
+						let id = port.portId
+						let oldPort = this.switch?.switchStatsPort?.find(({ portId }) => portId === port.portId)
+
+						if (!oldPort || oldPort?.speed !== port.speed) {
+							let portSpeed = CONSTANTS.speedStatusLevels[`${port.speed}`]
+							changedVars[`port_${id}_speed`] = portSpeed
+						}
+					})
+					this.switch.switchStatsPort = data.switchStatsPort
+					this.setVariableValues(changedVars)
+					this.checkFeedbacks('linkStatus')
 				}
 			}
 		} else if (cmd.match('swcfg_poe')) {
@@ -233,12 +239,8 @@ class ModuleInstance extends InstanceBase {
 					this.switch.poePortConfig = data.poePortConfig
 					this.initPresets()
 					this.initVariables()
-				} else {
-					this.switch.poePortConfig = data.poePortConfig
-					this.checkFeedbacks('poeEnabled')
-
-					let changedVars = []
-					this.switch.poePortConfig.forEach((port) => {
+					let changedVars = {}
+					data.poePortConfig.forEach((port) => {
 						let id = port.portid
 						let poeStatus = CONSTANTS.poeStatusLevels[`${port.status}`]
 						let poePower = port.currentPower / 1000
@@ -246,8 +248,26 @@ class ModuleInstance extends InstanceBase {
 						changedVars[`port_${id}_poe_status`] = poeStatus
 						changedVars[`port_${id}_poe_current_power`] = `${poePower} W`
 					})
-
 					this.setVariableValues(changedVars)
+				} else {
+					let changedVars = {}
+					data.poePortConfig.forEach((port) => {
+						let id = port.portid
+						let poeStatus = CONSTANTS.poeStatusLevels[`${port.status}`]
+						let poePower = port.currentPower / 1000
+
+						let oldPort = this.switch.poePortConfig?.find(({ portId }) => portId === port.portId)
+
+						if (!oldPort || oldPort?.status !== port.status) {
+							changedVars[`port_${id}_poe_status`] = poeStatus
+						}
+						if (!oldPort || oldPort?.currentPower !== port.currentPower) {
+							changedVars[`port_${id}_poe_current_power`] = `${poePower} W`
+						}
+					})
+					this.switch.poePortConfig = data.poePortConfig
+					this.setVariableValues(changedVars)
+					this.checkFeedbacks('poeEnabled')
 				}
 			}
 		}
