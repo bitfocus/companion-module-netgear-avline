@@ -3,7 +3,7 @@
 	"name": "netgear-avline",
 	"shortname": "avline",
 	"description": "Control Netgear AVLine network switches.",
-	"version": "1.1.0",
+	"version": "1.2.0",
 	"license": "MIT",
 	"repository": "git+https://github.com/bitfocus/companion-module-netgear-avline.git",
 	"bugs": "https://github.com/bitfocus/companion-module-netgear-avline/issues",
