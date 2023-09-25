@@ -4,6 +4,11 @@ See [HELP.md](./companion/HELP.md) and [LICENSE](./LICENSE)
 
 ## Changelog
 
+### v1.2.0
+
+- Features
+  - New variable for port VLANS
+
 ### v1.1.0
 
 - Features
