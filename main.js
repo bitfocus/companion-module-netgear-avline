@@ -215,6 +215,7 @@ class ModuleInstance extends InstanceBase {
 						let id = port.portId
 						let portSpeed = CONSTANTS.speedStatusLevels[`${port.speed}`]
 						changedVars[`port_${id}_speed`] = portSpeed
+						changedVars[`port_${id}_vlans`] = port.vlans
 					})
 					this.setVariableValues(changedVars)
 					this.checkFeedbacks('linkStatus')
@@ -227,6 +228,9 @@ class ModuleInstance extends InstanceBase {
 						if (!oldPort || oldPort?.speed !== port.speed) {
 							let portSpeed = CONSTANTS.speedStatusLevels[`${port.speed}`]
 							changedVars[`port_${id}_speed`] = portSpeed
+						}
+						if (!oldPort || oldPort?.vlans !== port.vlans) {
+							changedVars[`port_${id}_vlans`] = port.vlans
 						}
 					})
 					this.switch.switchStatsPort = data.switchStatsPort

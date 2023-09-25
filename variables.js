@@ -27,6 +27,10 @@ export function getVariables() {
 				name: `Port ${id} - Speed`,
 				variableId: `port_${id}_speed`,
 			})
+			variables.push({
+				name: `Port ${id} - VLANS`,
+				variableId: `port_${id}_vlans`,
+			})
 		})
 	}
 	if (this.switch.poePortConfig) {
