@@ -148,12 +148,9 @@ class ModuleInstance extends InstanceBase {
 		}, 1000)
 
 		//Token expires every 24hrs
-		this.tokenReAuth = setInterval(
-			() => {
-				this.initConnection()
-			},
-			24 * 60 * 60 * 1000,
-		)
+		this.tokenReAuth = setInterval(() => {
+			this.initConnection()
+		}, 24 * 60 * 60 * 1000)
 	}
 
 	stopSwitchPoll() {
