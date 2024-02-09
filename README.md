@@ -4,6 +4,11 @@ See [HELP.md](./companion/HELP.md) and [LICENSE](./LICENSE)
 
 ## Changelog
 
+### v1.2.1
+
+- Fixes
+  - Better error logging to help with troubleshooting
+
 ### v1.2.0
 
 - Features
