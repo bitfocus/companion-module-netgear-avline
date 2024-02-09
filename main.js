@@ -116,12 +116,20 @@ class ModuleInstance extends InstanceBase {
 						this.sendCommand('sw_portstats?portid=ALL', 'get')
 						this.startSwitchPoll()
 					} else {
-						this.updateStatus(InstanceStatus.ConnectionFailure)
+						this.updateStatus(InstanceStatus.BadConfig)
+						this.log('error', `Unable to login to Netgear switch, please verify your username and password`)
+						this.log('debug', String(data.resp))
 					}
 				}
 			})
 			.catch((error) => {
-				this.log('debug', error)
+				if (error.code) {
+					let code = error.code
+					this.log('error', `Unable to connect to Netgear switch (${code})`)
+				} else {
+					this.log('error', `Unable to connect to Netgear switch`)
+					this.log('debug', String(error))
+				}
 				this.updateStatus(InstanceStatus.ConnectionFailure)
 			})
 	}
