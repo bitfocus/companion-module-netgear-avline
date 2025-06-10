@@ -1,6 +1,6 @@
 import { combineRgb } from '@companion-module/base'
 
-export function getPresets() {
+export default function (self) {
 	const ColorWhite = combineRgb(255, 255, 255)
 	const ColorBlack = combineRgb(0, 0, 0)
 	const ColorRed = combineRgb(200, 0, 0)
@@ -9,8 +9,7 @@ export function getPresets() {
 
 	let presets = {}
 
-	if (this.switch.poePortConfig) {
-		this.switch.poePortConfig.forEach((port) => {
+		self.poe_status.all().forEach((port) => {
 			presets[`poe_${port.portid}`] = {
 				type: 'button',
 				category: 'POE',
@@ -49,11 +48,9 @@ export function getPresets() {
 				],
 			}
 		})
-	}
 
-	if (this.switch.switchStatsPort) {
-		this.switch.switchStatsPort.forEach((port) => {
-			presets[`poe_${port.portId}`] = {
+		self.port_stats.all().forEach((port) => {
+			presets[`link_${port.portId}`] = {
 				type: 'button',
 				category: 'Link Status',
 				name: `Link Status Port ${port.portId}`,
@@ -83,7 +80,6 @@ export function getPresets() {
 				],
 			}
 		})
-	}
 
-	return presets
+	self.setPresetDefinitions(presets)
 }
