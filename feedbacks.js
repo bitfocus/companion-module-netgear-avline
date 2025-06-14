@@ -1,6 +1,6 @@
 import { combineRgb } from '@companion-module/base'
 
-export default function(self) {
+export default function (self) {
 	const feedbacks = {}
 
 	const ColorWhite = combineRgb(255, 255, 255)
@@ -9,7 +9,7 @@ export default function(self) {
 	const ColorGreen = combineRgb(0, 200, 0)
 	const ColorOrange = combineRgb(255, 102, 0)
 
-	feedbacks['poeEnabled'] = {
+	;(feedbacks['poeEnabled'] = {
 		type: 'boolean',
 		name: 'POE Enabled',
 		description: 'Change style if port has POE enabled',
@@ -26,39 +26,39 @@ export default function(self) {
 			},
 		],
 		callback: async (feedback) => {
-			if(self.poe_status && self.poe_status.has(feedback.options.port)) {
+			if (self.poe_status && self.poe_status.has(feedback.options.port)) {
 				const port = self.poe_status.get_port_configuration(feedback.options.port)
 				return port.enable
 			}
 
 			return undefined
-		}
-	},
-	feedbacks['linkStatus'] = {
-		type: 'boolean',
-		name: 'Link Status',
-		description: 'Change style if port has active link',
-		defaultStyle: {
-			bgcolor: ColorGreen,
 		},
-		options: [
-			{
-				type: 'number',
-				label: 'Port',
-				id: 'port',
-				default: 1,
-				min: 1,
+	}),
+		(feedbacks['linkStatus'] = {
+			type: 'boolean',
+			name: 'Link Status',
+			description: 'Change style if port has active link',
+			defaultStyle: {
+				bgcolor: ColorGreen,
 			},
-		],
-		callback: async (feedback) => {
-			if(self.port_stats && self.port_stats.has(feedback.options.port)) {
-				const port = self.port_stats.get_port_stats(feedback.options.port)
-				return port.status === 0
-			}
+			options: [
+				{
+					type: 'number',
+					label: 'Port',
+					id: 'port',
+					default: 1,
+					min: 1,
+				},
+			],
+			callback: async (feedback) => {
+				if (self.port_stats && self.port_stats.has(feedback.options.port)) {
+					const port = self.port_stats.get_port_stats(feedback.options.port)
+					return port.status === 0
+				}
 
-			return undefined
-		}
-	}
+				return undefined
+			},
+		})
 
 	self.setFeedbackDefinitions(feedbacks)
 }
