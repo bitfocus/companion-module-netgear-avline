@@ -4,6 +4,16 @@ See [HELP.md](./companion/HELP.md) and [LICENSE](./LICENSE)
 
 ## Changelog
 
+### v1.2.3
+
+- Fixes
+  - Rework switch communication to prevent lag / crashes on control plane
+
+### v1.2.2
+
+- Fixes
+  - Update module dependencies with security fixes
+
 ### v1.2.1
 
 - Fixes
