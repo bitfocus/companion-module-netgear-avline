@@ -9,77 +9,77 @@ export default function (self) {
 
 	let presets = {}
 
-		self.poe_status.all().forEach((port) => {
-			presets[`poe_${port.portid}`] = {
-				type: 'button',
-				category: 'POE',
-				name: `POE Port ${port.portid}`,
-				options: {},
-				style: {
-					text: `POE\\nPort ${port.portid}`,
-					size: '14',
-					color: ColorWhite,
-					bgcolor: ColorBlack,
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'setPoeEnabled',
-								options: {
-									enabled: `toggle`,
-									port: port.portid,
-								},
+	self.poe_status.all().forEach((port) => {
+		presets[`poe_${port.portid}`] = {
+			type: 'button',
+			category: 'POE',
+			name: `POE Port ${port.portid}`,
+			options: {},
+			style: {
+				text: `POE\\nPort ${port.portid}`,
+				size: '14',
+				color: ColorWhite,
+				bgcolor: ColorBlack,
+			},
+			steps: [
+				{
+					down: [
+						{
+							actionId: 'setPoeEnabled',
+							options: {
+								enabled: `toggle`,
+								port: port.portid,
 							},
-						],
-						up: [],
-					},
-				],
-				feedbacks: [
-					{
-						feedbackId: 'poeEnabled',
-						options: {
-							port: port.portid,
 						},
-						style: {
-							bgcolor: ColorGreen,
-						},
-					},
-				],
-			}
-		})
-
-		self.port_stats.all().forEach((port) => {
-			presets[`link_${port.portId}`] = {
-				type: 'button',
-				category: 'Link Status',
-				name: `Link Status Port ${port.portId}`,
-				options: {},
-				style: {
-					text: `Link\\nPort ${port.portId}`,
-					size: '14',
-					color: ColorWhite,
-					bgcolor: ColorBlack,
+					],
+					up: [],
 				},
-				steps: [
-					{
-						down: [],
-						up: [],
+			],
+			feedbacks: [
+				{
+					feedbackId: 'poeEnabled',
+					options: {
+						port: port.portid,
 					},
-				],
-				feedbacks: [
-					{
-						feedbackId: 'linkStatus',
-						options: {
-							port: port.portId,
-						},
-						style: {
-							bgcolor: ColorGreen,
-						},
+					style: {
+						bgcolor: ColorGreen,
 					},
-				],
-			}
-		})
+				},
+			],
+		}
+	})
+
+	self.port_stats.all().forEach((port) => {
+		presets[`link_${port.portId}`] = {
+			type: 'button',
+			category: 'Link Status',
+			name: `Link Status Port ${port.portId}`,
+			options: {},
+			style: {
+				text: `Link\\nPort ${port.portId}`,
+				size: '14',
+				color: ColorWhite,
+				bgcolor: ColorBlack,
+			},
+			steps: [
+				{
+					down: [],
+					up: [],
+				},
+			],
+			feedbacks: [
+				{
+					feedbackId: 'linkStatus',
+					options: {
+						port: port.portId,
+					},
+					style: {
+						bgcolor: ColorGreen,
+					},
+				},
+			],
+		}
+	})
 
 	self.setPresetDefinitions(presets)
 }
