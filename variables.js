@@ -1,4 +1,4 @@
-export function getVariables() {
+export default function (self) {
 	const variables = []
 
 	variables.push({
@@ -20,8 +20,8 @@ export function getVariables() {
 		name: 'Uptime',
 		variableId: 'uptime',
 	})
-	if (this.switch.switchStatsPort) {
-		this.switch.switchStatsPort.forEach((port) => {
+	if (self.port_stats) {
+		self.port_stats.all().forEach((port) => {
 			let id = port.portId
 			variables.push({
 				name: `Port ${id} - Speed`,
@@ -33,8 +33,8 @@ export function getVariables() {
 			})
 		})
 	}
-	if (this.switch.poePortConfig) {
-		this.switch.poePortConfig.forEach((port) => {
+	if (self.poe_status) {
+		self.poe_status.all().forEach((port) => {
 			let id = port.portid
 			variables.push({
 				name: `Port ${id} - POE Status`,
@@ -46,5 +46,5 @@ export function getVariables() {
 			})
 		})
 	}
-	return variables
+	self.setVariableDefinitions(variables)
 }

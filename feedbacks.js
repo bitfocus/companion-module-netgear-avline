@@ -1,6 +1,6 @@
 import { combineRgb } from '@companion-module/base'
 
-export function getFeedbacks() {
+export default function(self) {
 	const feedbacks = {}
 
 	const ColorWhite = combineRgb(255, 255, 255)
@@ -25,14 +25,15 @@ export function getFeedbacks() {
 				min: 1,
 			},
 		],
-		callback: (feedback) => {
-			let portInfo = this.switch?.poePortConfig?.find(({ portid }) => portid === feedback.options.port)
-
-			if (portInfo) {
-				return portInfo.enable
+		callback: async (feedback) => {
+			if(self.poe_status && self.poe_status.has(feedback.options.port)) {
+				const port = self.poe_status.get_port_configuration(feedback.options.port)
+				return port.enable
 			}
-		},
-	}
+
+			return undefined
+		}
+	},
 	feedbacks['linkStatus'] = {
 		type: 'boolean',
 		name: 'Link Status',
@@ -49,14 +50,15 @@ export function getFeedbacks() {
 				min: 1,
 			},
 		],
-		callback: (feedback) => {
-			let portInfo = this.switch?.switchStatsPort?.find(({ portId }) => portId === feedback.options.port)
-
-			if (portInfo) {
-				return portInfo.status === 0 ? true : false
+		callback: async (feedback) => {
+			if(self.port_stats && self.port_stats.has(feedback.options.port)) {
+				const port = self.port_stats.get_port_stats(feedback.options.port)
+				return port.status === 0
 			}
-		},
+
+			return undefined
+		}
 	}
 
-	return feedbacks
+	self.setFeedbackDefinitions(feedbacks)
 }

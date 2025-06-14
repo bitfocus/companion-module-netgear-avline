@@ -1,13 +1,12 @@
 import { InstanceBase, Regex, runEntrypoint, InstanceStatus } from '@companion-module/base'
-import { getActions } from './actions.js'
-import { getPresets } from './presets.js'
-import { getVariables } from './variables.js'
-import { getFeedbacks } from './feedbacks.js'
+import setupActions from './actions.js'
+import setupPresets from './presets.js'
+import setupVariables from './variables.js'
+import setupFeedbacks from './feedbacks.js'
 import { upgradeScripts } from './upgrades.js'
 import CONSTANTS from './constants.js'
 
-import fetch from 'node-fetch'
-import https from 'https'
+import { NetgearM4250 } from './switch.js'
 
 class ModuleInstance extends InstanceBase {
 	constructor(internal) {
@@ -15,24 +14,138 @@ class ModuleInstance extends InstanceBase {
 	}
 
 	async init(config) {
-		this.config = config
-		this.switch = {}
-		this.updateStatus(InstanceStatus.Connecting)
-
-		this.initConnection()
-		this.initVariables()
-		this.initFeedbacks()
-		this.initActions()
+		this.applyConfig(config)
 	}
 
 	async destroy() {
-		this.log('debug', 'destroy')
-		this.stopSwitchPoll()
+		this.stopPolling()
 	}
 
 	async configUpdated(config) {
-		this.config = config
-		this.init(config)
+		this.applyConfig(config)
+	}
+
+	async applyConfig(config) {
+		this.stopPolling()
+		this.updateStatus(InstanceStatus.Connecting, 'Opening connection')
+
+		this.switch = new NetgearM4250(config.host, config.user, config.password)
+
+		try {
+			this.updateStatus(InstanceStatus.Connecting, 'Logging in')
+			const result = await this.switch.login()
+			this.updateStatus(InstanceStatus.Connecting, 'Refreshing data')
+
+			if (result === true) {
+				// Kick off the main polling loop once we know login was successful
+				await this.refreshSwitchData(this)
+
+				// Only mark the connection as `Ok` once we've successfully fetched data the first time
+				this.updateStatus(InstanceStatus.Ok, 'Connected')
+
+				// Setup the actions, feedbacks, and variables now that we have data for them
+				setupActions(this)
+				setupFeedbacks(this)
+				setupVariables(this)
+				setupPresets(this)
+			}
+		} catch (error) {
+			console.error(error)
+			this.log('error', error)
+			this.updateStatus(InstanceStatus.UnknownError, 'Unable to log in')
+		}
+	}
+
+	stopPolling() {
+		clearTimeout(this.refreshHandle)
+	}
+
+	/*
+	 * Runs the main polling loop
+	 *
+	 * This is where all of the background integration between companion and the switch happens.
+	 *
+	 * It is called by the startPolling() method and is responsible for:
+	 * - Refreshing the login token if it is about to expire
+	 * - Refreshing the port poe status
+	 * - Refreshing the port stats
+	 * - Refreshing the device status
+	 *
+	 * It uses `setTimeout` in a loop to ensure that the polling continues indefinitely without
+	 * any two instances of the method running at the same time – this can overload the switch. It also
+	 * ensures ensures that no two HTTP requests are in-flight at the same time. This further reduces load
+	 * on the switch.
+	 */
+	async refreshSwitchData(self) {
+		try {
+			self.log('debug', 'Refreshing switch data for `' + self.switch.url_or_ip_address + '`')
+			self.refreshLoginIfNeeded()
+			self.poe_status = await self.switch.get_port_poe_status()
+			self.port_stats = await self.switch.get_port_stats()
+			self.device_status = await self.switch.get_device_status()
+			self.log('debug', 'Switch data refreshed for `' + self.switch.url_or_ip_address + '`')
+
+			// Update the feedbacks and variables at the end of the loop, because otherwise there's tearing
+			// in the UI – the PoE status will show as "disabled" but the link status will remain up for a moment
+			// even if the device is PoE powered and is already off. Tearing can still happen if the command is issued
+			// in the middle of the loop, but it's less likely.
+			self.checkFeedbacks()
+			self.updateVariables()
+		} catch (error) {
+			console.error(error)
+		} finally {
+			self.refreshHandle = setTimeout(self.refreshSwitchData, 1000, self)
+		}
+	}
+
+	/*
+	 * Periodically refreshes the login token as part of the main polling loop
+	 */
+	async refreshLoginIfNeeded() {
+		// Refresh the login token an hour before it expires
+		if (this.switch.loginExpiresAt && this.switch.loginExpiresAt < Date.now() - 3600) {
+			console.log('Refreshing login token')
+			await this.switch.login()
+		}
+
+		// Check if the currnet login token is valid – if the switch has rebooted, or someone
+		// has used the switch's built-in web interface recently, the token may be invalid.
+		try {
+			await this.switch.get_device_name()
+		} catch (error) {
+			this.log('info', 'Login token became invalid, refreshing')
+			await this.switch.login()
+		}
+	}
+
+	/*
+	 * Process the new device data and update companion with the new values
+	 *
+	 * See: https://github.com/bitfocus/companion-module-base/wiki/Variables
+	 */
+	updateVariables() {
+		const changedVars = []
+
+		changedVars['active_ports'] = this.device_status.numOfActivePorts
+		changedVars['cpu_usage'] = this.device_status.cpuUsage
+		changedVars['memory_usage'] = this.device_status.memoryUsage
+		changedVars['uptime'] = this.device_status.upTime
+
+		for (const port of this.poe_status.all()) {
+			let poeStatus = CONSTANTS.poeStatusLevels[`${port.status}`]
+			let poePower = port.currentPower / 1000
+
+			changedVars[`port_${port.portid}_poe_status`] = poeStatus
+			changedVars[`port_${port.portid}_poe_current_power`] = `${poePower} W`
+		}
+
+		for (const port of this.port_stats.all()) {
+			let portSpeed = CONSTANTS.speedStatusLevels[`${port.speed}`]
+			changedVars[`port_${port.portId}_speed`] = portSpeed
+			changedVars[`port_${port.portId}_vlans`] = port.vlans
+		}
+
+		this.setVariableValues(changedVars)
 	}
 
 	getConfigFields() {
@@ -57,234 +170,6 @@ class ModuleInstance extends InstanceBase {
 				width: 4,
 			},
 		]
-	}
-
-	initVariables() {
-		const variables = getVariables.bind(this)()
-		this.setVariableDefinitions(variables)
-	}
-
-	initFeedbacks() {
-		const feedbacks = getFeedbacks.bind(this)()
-		this.setFeedbackDefinitions(feedbacks)
-	}
-
-	initPresets() {
-		const presets = getPresets.bind(this)()
-		this.setPresetDefinitions(presets)
-	}
-
-	initActions() {
-		const actions = getActions.bind(this)()
-		this.setActionDefinitions(actions)
-	}
-
-	initConnection() {
-		this.stopSwitchPoll()
-		this.httpsAgent = new https.Agent({
-			rejectUnauthorized: false,
-		})
-
-		let params = {
-			login: {
-				username: this.config.user,
-				password: this.config.password,
-			},
-		}
-		params = JSON.stringify(params)
-
-		fetch(`https://${this.config.host}:8443/api/v1/login`, {
-			method: 'post',
-			body: params,
-			headers: { 'Content-Type': 'application/json' },
-			agent: this.httpsAgent,
-		})
-			.then((res) => {
-				if (res.status == 200) {
-					return res.json()
-				}
-			})
-			.then((json) => {
-				let data = json
-				if (data) {
-					if (data.resp?.status == 'success') {
-						this.updateStatus(InstanceStatus.Ok)
-						this.switch.token = data.login.token
-						this.switch.tokenExpire = data.login.expire
-
-						this.getSwitchInfo()
-						this.sendCommand('sw_portstats?portid=ALL', 'get')
-						this.startSwitchPoll()
-					} else {
-						this.updateStatus(InstanceStatus.BadConfig)
-						this.log('error', `Unable to login to Netgear switch, please verify your username and password`)
-						this.log('debug', String(data.resp))
-					}
-				}
-			})
-			.catch((error) => {
-				if (error.code) {
-					let code = error.code
-					this.log('error', `Unable to connect to Netgear switch (${code})`)
-				} else {
-					this.log('error', `Unable to connect to Netgear switch`)
-					this.log('debug', String(error))
-				}
-				this.updateStatus(InstanceStatus.ConnectionFailure)
-			})
-	}
-
-	getSwitchInfo() {
-		this.sendCommand('device_info', 'get')
-		this.sendCommand('swcfg_poe?portid=ALL', 'get')
-		this.sendCommand('sw_portstats?portid=ALL', 'get')
-	}
-
-	startSwitchPoll() {
-		this.stopSwitchPoll()
-
-		this.switchPoll = setInterval(() => {
-			this.getSwitchInfo()
-		}, 1000)
-
-		//Token expires every 24hrs
-		this.tokenReAuth = setInterval(() => {
-			this.initConnection()
-		}, 24 * 60 * 60 * 1000)
-	}
-
-	stopSwitchPoll() {
-		if (this.switchPoll) {
-			clearInterval(this.switchPoll)
-			delete this.switchPoll
-		}
-		if (this.tokenReAuth) {
-			clearInterval(this.tokenReAuth)
-			delete this.tokenReAuth
-		}
-	}
-
-	sendCommand(cmd, type, params) {
-		let url = `https://${this.config.host}:8443/api/v1/${cmd}`
-		let options = {}
-		if (type == 'PUT' || type == 'POST') {
-			options = {
-				method: type,
-				body: params != undefined ? JSON.stringify(params) : null,
-				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.switch.token}` },
-				agent: this.httpsAgent,
-			}
-		} else {
-			options = {
-				method: type,
-				body: params != undefined ? JSON.stringify(params) : null,
-				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.switch.token}` },
-				agent: this.httpsAgent,
-			}
-		}
-
-		fetch(url, options)
-			.then((res) => {
-				if (res.status == 200) {
-					return res.json()
-				}
-			})
-
-			.then((json) => {
-				let data = json
-				if (data) {
-					this.processData(cmd, data)
-				}
-			})
-			.catch((error) => {
-				this.log('debug', error)
-			})
-	}
-
-	processData(cmd, data) {
-		if (cmd.match('device_info')) {
-			this.switch.deviceInfo = data.deviceInfo
-			let info = data.deviceInfo
-
-			this.setVariableValues({
-				active_ports: info.numOfActivePorts,
-				memory_usage: info.memoryUsage,
-				cpu_usage: info.cpuUsage,
-				uptime: info.upTime,
-			})
-		} else if (cmd.match('sw_portstats')) {
-			if (data.switchStatsPort) {
-				if (!this.switch.switchStatsPort) {
-					this.switch.switchStatsPort = data.switchStatsPort
-					this.initPresets()
-					this.initVariables()
-					let changedVars = {}
-					data.switchStatsPort.forEach((port) => {
-						let id = port.portId
-						let portSpeed = CONSTANTS.speedStatusLevels[`${port.speed}`]
-						changedVars[`port_${id}_speed`] = portSpeed
-						changedVars[`port_${id}_vlans`] = port.vlans
-					})
-					this.setVariableValues(changedVars)
-					this.checkFeedbacks('linkStatus')
-				} else {
-					let changedVars = {}
-					data.switchStatsPort.forEach((port) => {
-						let id = port.portId
-						let oldPort = this.switch?.switchStatsPort?.find(({ portId }) => portId === port.portId)
-
-						if (!oldPort || oldPort?.speed !== port.speed) {
-							let portSpeed = CONSTANTS.speedStatusLevels[`${port.speed}`]
-							changedVars[`port_${id}_speed`] = portSpeed
-						}
-						if (!oldPort || oldPort?.vlans !== port.vlans) {
-							changedVars[`port_${id}_vlans`] = port.vlans
-						}
-					})
-					this.switch.switchStatsPort = data.switchStatsPort
-					this.setVariableValues(changedVars)
-					this.checkFeedbacks('linkStatus')
-				}
-			}
-		} else if (cmd.match('swcfg_poe')) {
-			if (data.poePortConfig) {
-				if (!this.switch.poePortConfig) {
-					this.switch.poePortConfig = data.poePortConfig
-					this.initPresets()
-					this.initVariables()
-					let changedVars = {}
-					data.poePortConfig.forEach((port) => {
-						let id = port.portid
-						let poeStatus = CONSTANTS.poeStatusLevels[`${port.status}`]
-						let poePower = port.currentPower / 1000
-
-						changedVars[`port_${id}_poe_status`] = poeStatus
-						changedVars[`port_${id}_poe_current_power`] = `${poePower} W`
-					})
-					this.setVariableValues(changedVars)
-					this.checkFeedbacks('poeEnabled')
-				} else {
-					let changedVars = {}
-					data.poePortConfig.forEach((port) => {
-						let id = port.portid
-						let poeStatus = CONSTANTS.poeStatusLevels[`${port.status}`]
-						let poePower = port.currentPower / 1000
-
-						let oldPort = this.switch.poePortConfig?.find(({ portId }) => portId === port.portId)
-
-						if (!oldPort || oldPort?.status !== port.status) {
-							changedVars[`port_${id}_poe_status`] = poeStatus
-						}
-						if (!oldPort || oldPort?.currentPower !== port.currentPower) {
-							changedVars[`port_${id}_poe_current_power`] = `${poePower} W`
-						}
-					})
-					this.switch.poePortConfig = data.poePortConfig
-					this.setVariableValues(changedVars)
-					this.checkFeedbacks('poeEnabled')
-				}
-			}
-		}
 	}
 }
 

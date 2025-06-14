@@ -1,10 +1,11 @@
-export function getActions() {
+export default function (self) {
 	let poeChoices = [
 		{ id: 'toggle', label: 'Toggle' },
 		{ id: true, label: 'Enable' },
 		{ id: false, label: 'Disable' },
 	]
-	return {
+
+	self.setActionDefinitions({
 		setPoeEnabled: {
 			name: 'Set POE',
 			options: [
@@ -23,20 +24,17 @@ export function getActions() {
 					min: 1,
 				},
 			],
-			callback: (action) => {
-				let portInfo = this.switch?.poePortConfig?.find(({ portid }) => portid === action.options.port)
-
-				if (portInfo) {
-					let body = portInfo
-					let state
-
-					if (action.options.enabled === 'toggle') {
-						state = body.enable === true ? false : true
-					} else {
-						state = action.options.enabled
-					}
-					body.enable = state
-					this.sendCommand(`swcfg_poe?portid=${action.options.port}`, 'POST', { poePortConfig: body })
+			callback: async (action) => {
+				switch (action.options.enabled) {
+					case true:
+						await self.switch.enable_poe_ports([action.options.port])
+						break
+					case false:
+						await self.switch.disable_poe_ports([action.options.port])
+						break
+					case 'toggle':
+						await self.switch.toggle_poe_ports([action.options.port])
+						break
 				}
 			},
 		},
@@ -51,26 +49,16 @@ export function getActions() {
 					min: 1,
 				},
 			],
-			callback: (action) => {
-				let portInfo = this.switch?.poePortConfig?.find(({ portid }) => portid === action.options.port)
-
-				if (portInfo) {
-					let body = portInfo
-					body.reset = true
-					this.sendCommand(`swcfg_poe?portid=${action.options.port}`, 'POST', { poePortConfig: body })
-				}
+			callback: async (action) => {
+				await self.switch.power_cycle_poe_ports([action.options.port])
 			},
 		},
 		reboot: {
 			name: 'Reboot Switch',
 			options: [],
-			callback: () => {
-				this.sendCommand('device_reboot', 'POST', {
-					deviceReboot: {
-						afterSecs: 2,
-					},
-				})
+			callback: async (action) => {
+				await self.switch.power_cycle_switch()
 			},
 		},
-	}
+	})
 }
