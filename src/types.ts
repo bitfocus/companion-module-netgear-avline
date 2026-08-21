@@ -56,6 +56,35 @@ export interface PoeConfigGetResponse extends ApiResponseEnvelope {
 	poe_config: PoeConfig
 }
 
+/** A unicast/multicast/broadcast rate limit, part of a port's configuration */
+export interface PortRateLimit {
+	status: boolean
+	threshold: number
+}
+
+/** Per-port configuration, from `/swcfg_port` */
+export interface PortConfig {
+	ID: number
+	description?: string
+	/** Whether the physical interface is enabled */
+	adminMode?: boolean
+	/** Whether the port is PoE capable */
+	isPoE?: boolean
+	portVlanId?: number
+	portType?: number
+	txRate?: number
+	defVlanPrio?: number
+	rtlimitUcast?: PortRateLimit
+	rtlimitMcast?: PortRateLimit
+	rtlimitBcast?: PortRateLimit
+	[key: string]: unknown
+}
+
+export interface PortConfigResponse extends ApiResponseEnvelope {
+	/** An array when every port is requested at once, a single port otherwise */
+	switchPortConfig: PortConfig[] | PortConfig
+}
+
 export interface SwitchStatsPort {
 	portId: number
 	/** See `speedStatusLevels` */
@@ -63,6 +92,14 @@ export interface SwitchStatsPort {
 	/** `0` = link up, `1` = link down */
 	status: number
 	vlans: number[]
+	/** Current receive bit rate, in Mbps */
+	rxMbps?: string
+	/** Current transmit bit rate, in Mbps */
+	txMbps?: string
+	/** Total bytes received */
+	trafficRx?: number
+	/** Total bytes transmitted */
+	trafficTx?: number
 	[key: string]: unknown
 }
 
@@ -117,4 +154,76 @@ export function temperatureSensors(device: DeviceInfo): TemperatureSensor[] {
 	if (!sensors) return []
 
 	return (Array.isArray(sensors) ? sensors : [sensors]).filter((sensor) => typeof sensor?.sensorNum === 'number')
+}
+
+/** A port's VLAN switchport configuration, from `/dot1q_sw_port_config` */
+export interface Dot1qPortConfig {
+	interface?: number
+	accessVlan?: number
+	allowedVlanList?: string[]
+	/** `none`, `general`, `access`, `trunk`, `privateHost` or `privatePromisc` */
+	configMode?: string
+	nativeVlan?: number | string
+	[key: string]: unknown
+}
+
+export interface Dot1qPortConfigResponse extends ApiResponseEnvelope {
+	dot1q_sw_port_config: Dot1qPortConfig
+}
+
+/** SFP diagnostics, from `/fiber_optics` */
+export interface FiberOptic {
+	port: string
+	temp?: string
+	voltage?: string
+	current?: string
+	outputPower?: string
+	inputPower?: string
+	txFault?: string
+	los?: string
+	faultStatus?: string
+	vendorName?: string
+	serialNumber?: string
+	partNumber?: string
+	[key: string]: unknown
+}
+
+export interface FiberOpticsResponse extends ApiResponseEnvelope {
+	/** An array in practice, though the spec describes a single module */
+	fiber_optics: FiberOptic[] | FiberOptic
+}
+
+/** An LLDP neighbour, from `/lldp_remote_devices` */
+export interface LldpRemoteDevice {
+	id?: number
+	/** Interface the neighbour was seen on. Matches the port number for physical ports */
+	ifIndex: number
+	chassisId?: string
+	remotePortId?: string
+	remotePortDesc?: string
+	remoteSysName?: string
+	remoteSysDesc?: string
+	[key: string]: unknown
+}
+
+export interface LldpRemoteDevicesResponse extends ApiResponseEnvelope {
+	lldp_remote_devices: LldpRemoteDevice[]
+}
+
+/** A port's membership of a VLAN */
+export interface VlanPortMember {
+	port: number
+	/** Whether the port carries the VLAN tagged */
+	tagged: boolean
+}
+
+/** A VLAN's full membership, from `/swcfg_vlan_membership` */
+export interface VlanMembership {
+	vlanid: number
+	portMembers?: VlanPortMember[]
+	[key: string]: unknown
+}
+
+export interface VlanMembershipResponse extends ApiResponseEnvelope {
+	vlanMembership: VlanMembership
 }

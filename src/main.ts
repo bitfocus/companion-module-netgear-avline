@@ -6,8 +6,8 @@ import { getFeedbackDefinitions } from './feedbacks.js'
 import { upgradeScripts } from './upgrades.js'
 import { getConfigFields, type ModuleConfig, type ModuleSecrets } from './config.js'
 import { poeStatusLevels, speedStatusLevels, temperatureSensorStates } from './constants.js'
-import { NetgearM4250, type PortPoeConfigurationMap, type PortStatsMap } from './switch.js'
-import { temperatureSensors, type DeviceInfo, type PoeConfig } from './types.js'
+import { NetgearM4250, type PortConfigurationMap, type PortPoeConfigurationMap, type PortStatsMap } from './switch.js'
+import { temperatureSensors, type DeviceInfo, type FiberOptic, type LldpRemoteDevice, type PoeConfig } from './types.js'
 
 /*
  * Only the PoE port configuration and the port statistics drive feedbacks, so only they are
@@ -22,15 +22,31 @@ const POE_CONFIG_POLL_INTERVAL_MS = 30000
 /** Failed passes back off exponentially from the fast interval up to this, then hold */
 const MAX_FAILURE_BACKOFF_MS = 10000
 
+/** Consecutive failed passes before the session is thrown away and re-established */
+const FAILURES_BEFORE_RELOGIN = 3
+
 /** Which parts of the switch data changed on the last pass */
 interface ChangedData {
 	poe: boolean
 	stats: boolean
 	device: boolean
 	poeConfig: boolean
+	portConfig: boolean
+	fiber: boolean
+	lldp: boolean
+	traffic: boolean
 }
 
-const ALL_CHANGED: ChangedData = { poe: true, stats: true, device: true, poeConfig: true }
+const ALL_CHANGED: ChangedData = {
+	poe: true,
+	stats: true,
+	device: true,
+	poeConfig: true,
+	portConfig: true,
+	fiber: true,
+	lldp: true,
+	traffic: true,
+}
 
 class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	switch!: NetgearM4250
@@ -38,6 +54,9 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	port_stats?: PortStatsMap
 	device_status?: DeviceInfo
 	poe_config?: PoeConfig
+	port_config?: PortConfigurationMap
+	fiber_optics: FiberOptic[] = []
+	lldp_devices: LldpRemoteDevice[] = []
 
 	/*
 	 * Incremented every time the config is applied or the module is destroyed. The polling loop
@@ -52,7 +71,16 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	private poeConfigFetchedAt = 0
 
 	/** Serialized copies of the last response, to avoid republishing data that hasn't changed */
-	private lastSeen: Record<keyof ChangedData, string> = { poe: '', stats: '', device: '', poeConfig: '' }
+	private lastSeen: Record<keyof ChangedData, string> = {
+		poe: '',
+		stats: '',
+		device: '',
+		poeConfig: '',
+		portConfig: '',
+		fiber: '',
+		lldp: '',
+		traffic: '',
+	}
 
 	private consecutiveFailures = 0
 	private pollInFlight = false
@@ -96,7 +124,16 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 		this.deviceInfoFetchedAt = 0
 		this.poeConfigFetchedAt = 0
-		this.lastSeen = { poe: '', stats: '', device: '', poeConfig: '' }
+		this.lastSeen = {
+			poe: '',
+			stats: '',
+			device: '',
+			poeConfig: '',
+			portConfig: '',
+			fiber: '',
+			lldp: '',
+			traffic: '',
+		}
 		this.consecutiveFailures = 0
 
 		this.scheduleNextRun(this.generation, 0, true)
@@ -140,6 +177,13 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 			this.updateStatus(InstanceStatus.Connecting, 'Refreshing data')
 			await this.fetchSwitchData()
+			if (generation !== this.generation) return
+
+			// Needed before the definitions are built, so that port fields can be bounded to the
+			// ports this switch actually has
+			this.port_config = await this.switch.get_port_configurations(this.portCount())
+			this.fiber_optics = await this.switch.get_fiber_optics()
+			this.lldp_devices = await this.switch.get_lldp_remote_devices()
 			if (generation !== this.generation) return
 
 			// Only mark the connection as `Ok` once we've successfully fetched data the first time
@@ -219,6 +263,10 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			this.log('error', `Unable to refresh switch data: ${describeError(error)}`)
 			this.updateStatus(InstanceStatus.ConnectionFailure, 'Unable to refresh switch data')
 			delay = this.failureBackoff()
+
+			// The switch only names an expired token some of the time, so rather than guessing from
+			// the message, a run of failures is taken as reason enough to log in again
+			if (this.consecutiveFailures >= FAILURES_BEFORE_RELOGIN) this.switch.invalidate_session()
 		} finally {
 			this.pollInFlight = false
 		}
@@ -245,11 +293,25 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		this.poe_status = await this.switch.get_port_poe_status()
 		this.port_stats = await this.switch.get_port_stats()
 
+		const ports = this.port_stats.all()
+
+		/*
+		 * Link state and traffic counters arrive in the same response but are compared separately:
+		 * the bit rates change almost every second, and lumping them together would mean
+		 * re-checking the link feedbacks and republishing every port variable on every pass.
+		 */
+		const linkState = ports.map((port) => [port.portId, port.speed, port.status, port.vlans])
+		const traffic = ports.map((port) => [port.portId, port.rxMbps, port.txMbps, port.trafficRx, port.trafficTx])
+
 		const changed: ChangedData = {
 			poe: this.hasChanged('poe', this.poe_status.all()),
-			stats: this.hasChanged('stats', this.port_stats.all()),
+			stats: this.hasChanged('stats', linkState),
+			traffic: this.hasChanged('traffic', traffic),
 			device: false,
 			poeConfig: false,
+			portConfig: false,
+			fiber: false,
+			lldp: false,
 		}
 
 		if (now - this.deviceInfoFetchedAt >= DEVICE_INFO_POLL_INTERVAL_MS) {
@@ -259,12 +321,65 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		}
 
 		if (now - this.poeConfigFetchedAt >= POE_CONFIG_POLL_INTERVAL_MS) {
-			this.poe_config = await this.switch.get_poe_config()
+			this.poe_config = (await this.switch.get_poe_config()) ?? undefined
 			this.poeConfigFetchedAt = now
 			changed.poeConfig = this.hasChanged('poeConfig', this.poe_config)
+
+			// Port configuration is refreshed on the same slow tier, but only when the switch can
+			// return every port at once – otherwise it would be a request per port
+			if (this.switch.bulk_port_config_supported) {
+				this.port_config = await this.switch.get_port_configurations(this.portCount())
+				changed.portConfig = this.hasChanged('portConfig', this.port_config.all())
+			}
+
+			// Transceiver diagnostics and LLDP neighbours move slowly too, and each is one request
+			this.fiber_optics = await this.switch.get_fiber_optics()
+			changed.fiber = this.hasChanged('fiber', this.fiber_optics)
+
+			this.lldp_devices = await this.switch.get_lldp_remote_devices()
+			changed.lldp = this.hasChanged('lldp', this.lldp_devices)
 		}
 
 		return changed
+	}
+
+	/*
+	 * Re-read a single port after writing to it, so its feedbacks and variables update straight
+	 * away. Port configuration otherwise only refreshes on the slow tier.
+	 */
+	async refreshPortConfig(port: number): Promise<void> {
+		if (!this.port_config) return
+
+		this.port_config.replace(await this.switch.get_port_configuration(port))
+		this.lastSeen.portConfig = JSON.stringify(this.port_config.all())
+
+		this.checkFeedbacks('portEnabled', 'portVlan')
+		this.updateVariables({ ...ALL_CHANGED, poe: false, stats: false, device: false, poeConfig: false })
+	}
+
+	/*
+	 * The number of ports on this switch, used to bound the port fields on actions and feedbacks.
+	 * Falls back to the highest port seen in the statistics if the device info didn't report it.
+	 */
+	portCount(): number {
+		const reported = this.device_status?.numOfPorts
+		if (reported) return reported
+
+		const ports = this.port_stats?.all() ?? []
+		return ports.reduce((highest, port) => Math.max(highest, port.portId), 0)
+	}
+
+	/** The ports the switch reports as PoE capable, falling back to whatever the PoE endpoint lists */
+	poePortIds(): number[] {
+		const capable = this.port_config?.poe_ports() ?? []
+		if (capable.length > 0) return capable.map((port) => port.ID)
+
+		return (this.poe_status?.all() ?? []).map((port) => port.portid)
+	}
+
+	isPoePort(port: number): boolean {
+		const ids = this.poePortIds()
+		return ids.length === 0 || ids.includes(port)
 	}
 
 	private hasChanged(key: keyof ChangedData, data: unknown): boolean {
@@ -319,6 +434,52 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			}
 		}
 
+		if (changed.portConfig) {
+			for (const port of this.port_config?.all() ?? []) {
+				changedVars[`port_${port.ID}_description`] = port.description ?? ''
+				changedVars[`port_${port.ID}_is_poe`] = port.isPoE ?? false
+				changedVars[`port_${port.ID}_admin_mode`] =
+					port.adminMode === undefined ? '' : port.adminMode ? 'Enabled' : 'Disabled'
+				changedVars[`port_${port.ID}_access_vlan`] = port.portVlanId ?? ''
+			}
+
+			changedVars['poe_ports'] = this.poePortIds().length
+		}
+
+		if (changed.fiber) {
+			for (const module of this.fiber_optics) {
+				const id = fiberVariableId(module.port)
+
+				changedVars[`sfp_${id}_temperature`] = module.temp ?? ''
+				changedVars[`sfp_${id}_voltage`] = module.voltage ?? ''
+				changedVars[`sfp_${id}_current`] = module.current ?? ''
+				changedVars[`sfp_${id}_input_power`] = module.inputPower ?? ''
+				changedVars[`sfp_${id}_output_power`] = module.outputPower ?? ''
+				changedVars[`sfp_${id}_loss_of_signal`] = module.los ?? ''
+				changedVars[`sfp_${id}_tx_fault`] = module.txFault ?? ''
+				changedVars[`sfp_${id}_fault_status`] = module.faultStatus ?? ''
+				changedVars[`sfp_${id}_vendor`] = module.vendorName ?? ''
+				changedVars[`sfp_${id}_part_number`] = module.partNumber ?? ''
+				changedVars[`sfp_${id}_serial_number`] = module.serialNumber ?? ''
+			}
+		}
+
+		if (changed.lldp) {
+			for (let port = 1; port <= this.portCount(); port++) {
+				changedVars[`port_${port}_lldp_system_name`] = ''
+				changedVars[`port_${port}_lldp_port_id`] = ''
+				changedVars[`port_${port}_lldp_port_description`] = ''
+				changedVars[`port_${port}_lldp_chassis_id`] = ''
+			}
+
+			for (const device of this.lldp_devices) {
+				changedVars[`port_${device.ifIndex}_lldp_system_name`] = device.remoteSysName ?? ''
+				changedVars[`port_${device.ifIndex}_lldp_port_id`] = device.remotePortId ?? ''
+				changedVars[`port_${device.ifIndex}_lldp_port_description`] = device.remotePortDesc ?? ''
+				changedVars[`port_${device.ifIndex}_lldp_chassis_id`] = device.chassisId ?? ''
+			}
+		}
+
 		if (changed.stats) {
 			for (const port of this.port_stats?.all() ?? []) {
 				changedVars[`port_${port.portId}_speed`] = speedStatusLevels[port.speed] ?? 'Unknown'
@@ -326,8 +487,23 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			}
 		}
 
+		if (changed.traffic) {
+			for (const port of this.port_stats?.all() ?? []) {
+				// Rates are published unitless so they can be compared and formatted in expressions
+				changedVars[`port_${port.portId}_rx_mbps`] = port.rxMbps ?? ''
+				changedVars[`port_${port.portId}_tx_mbps`] = port.txMbps ?? ''
+				changedVars[`port_${port.portId}_rx_bytes`] = port.trafficRx ?? ''
+				changedVars[`port_${port.portId}_tx_bytes`] = port.trafficTx ?? ''
+			}
+		}
+
 		if (Object.keys(changedVars).length > 0) this.setVariableValues(changedVars)
 	}
+}
+
+/* The switch reports fibre ports as free-form strings such as `1/0/49`, which can't be used as-is */
+export function fiberVariableId(port: string): string {
+	return String(port).replace(/[^a-zA-Z0-9]+/g, '_')
 }
 
 /* Documented as an array of objects, but firmware has been seen to send a bare string */
