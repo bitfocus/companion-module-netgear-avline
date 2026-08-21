@@ -1,15 +1,14 @@
-import { combineRgb } from '@companion-module/base'
+import { combineRgb, type CompanionPresetDefinitions } from '@companion-module/base'
+import type { ModuleInstance } from './main.js'
 
-export default function (self) {
+export function getPresetDefinitions(self: ModuleInstance): CompanionPresetDefinitions {
 	const ColorWhite = combineRgb(255, 255, 255)
 	const ColorBlack = combineRgb(0, 0, 0)
-	const ColorRed = combineRgb(200, 0, 0)
 	const ColorGreen = combineRgb(0, 200, 0)
-	const ColorOrange = combineRgb(255, 102, 0)
 
-	let presets = {}
+	const presets: CompanionPresetDefinitions = {}
 
-	self.poe_status.all().forEach((port) => {
+	for (const port of self.poe_status?.all() ?? []) {
 		presets[`poe_${port.portid}`] = {
 			type: 'button',
 			category: 'POE',
@@ -27,7 +26,7 @@ export default function (self) {
 						{
 							actionId: 'setPoeEnabled',
 							options: {
-								enabled: `toggle`,
+								enabled: 'toggle',
 								port: port.portid,
 							},
 						},
@@ -47,9 +46,9 @@ export default function (self) {
 				},
 			],
 		}
-	})
+	}
 
-	self.port_stats.all().forEach((port) => {
+	for (const port of self.port_stats?.all() ?? []) {
 		presets[`link_${port.portId}`] = {
 			type: 'button',
 			category: 'Link Status',
@@ -79,7 +78,7 @@ export default function (self) {
 				},
 			],
 		}
-	})
+	}
 
-	self.setPresetDefinitions(presets)
+	return presets
 }
