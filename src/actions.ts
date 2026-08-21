@@ -148,8 +148,7 @@ export function getActionDefinitions(self: ModuleInstance): CompanionActionDefin
 		},
 		setPortVlan: {
 			name: 'Set Port VLAN',
-			description:
-				"Put a port on a VLAN. 'Untagged' is the usual choice for an endpoint: it makes the port an untagged member and points the port's own traffic at that VLAN. 'PVID only' is for a port that already belongs to the VLAN.",
+			description: 'Assign a port to a VLAN.',
 			options: [
 				portField(self),
 				vlanField(),

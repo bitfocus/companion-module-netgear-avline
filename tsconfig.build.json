@@ -3,11 +3,10 @@
 	"include": ["src/**/*.ts"],
 	"exclude": ["node_modules/**"],
 	"compilerOptions": {
+		"alwaysStrict": true,
+		"rootDir": "./src",
 		"outDir": "./dist",
-		"baseUrl": "./",
-		"paths": {
-			"*": ["./node_modules/*"]
-		},
+		"paths": {},
 		"module": "Node16",
 		"moduleResolution": "Node16"
 	}

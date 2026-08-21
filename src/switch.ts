@@ -10,8 +10,6 @@ import type {
 	PoeConfigGetResponse,
 	PoeConfigResponse,
 	PoePortConfig,
-	Dot1qPortConfig,
-	Dot1qPortConfigResponse,
 	FiberOptic,
 	FiberOpticsResponse,
 	LldpRemoteDevice,
@@ -337,22 +335,17 @@ class NetgearM4250 {
 	}
 
 	/*
-	 * Only the fields the API documents as required are sent, plus `reset` when power cycling.
-	 * Echoing the whole configuration back would include read-only fields like `status` and
-	 * `currentPower`, and the port id must not be repeated in the body.
+	 * The port's configuration is sent back as the switch reported it, with only the change
+	 * applied. Trimming it to the fields the API documents as required is rejected by the switch
+	 * with "Failed to parse request params" – it expects the whole object. The port id is the one
+	 * field that must not be repeated in the body.
 	 */
 	private async writePoeConfig(port: number, config: PoePortConfig, changes: PoePortConfigWrite): Promise<void> {
+		const { portid: _portid, ...poePortConfig } = config
+
 		await this.request(`swcfg_poe?portid=${port}`, {
 			method: 'POST',
-			body: {
-				poePortConfig: {
-					enable: config.enable,
-					powerLimitMode: config.powerLimitMode,
-					classification: config.classification,
-					powerLimit: config.powerLimit,
-					...changes,
-				},
-			},
+			body: { poePortConfig: { ...poePortConfig, ...changes } },
 		})
 	}
 
@@ -443,7 +436,7 @@ class NetgearM4250 {
 
 			if (!this.unsupported.has(path)) {
 				this.unsupported.add(path)
-				this.log('info', `Switch does not provide ${path}: ${error.message}`)
+				this.log('debug', `Switch does not provide ${path}: ${error.message}`)
 			}
 
 			return null
@@ -467,62 +460,41 @@ class NetgearM4250 {
 	/**
 	 * Enable or disable a physical port.
 	 *
-	 * The API requires the whole port configuration on a write, so the current values are sent
-	 * back with only the admin mode changed.
+	 * As with the PoE write, the port's configuration is read and sent back exactly as the switch
+	 * reported it with only the admin mode changed. Sending just the fields the API marks as
+	 * required is rejected with `system_config param error`.
 	 */
 	async set_port_admin_mode(port: number, adminMode: boolean): Promise<void> {
 		const config = await this.get_port_configuration(port)
 
 		await this.request(`swcfg_port?portid=${port}`, {
 			method: 'POST',
-			body: {
-				switchPortConfig: {
-					ID: config.ID,
-					description: config.description ?? '',
-					portType: config.portType ?? 1,
-					isPoE: config.isPoE ?? false,
-					txRate: config.txRate ?? 0,
-					rtlimitUcast: config.rtlimitUcast ?? { status: false, threshold: 5 },
-					rtlimitMcast: config.rtlimitMcast ?? { status: false, threshold: 5 },
-					rtlimitBcast: config.rtlimitBcast ?? { status: false, threshold: 5 },
-					portVlanId: config.portVlanId ?? 1,
-					defVlanPrio: config.defVlanPrio ?? 0,
-					adminMode,
-				},
-			},
+			body: { switchPortConfig: { ...config, adminMode } },
 		})
 
 		this.log('debug', `${adminMode ? 'Enabled' : 'Disabled'} port ${port}`)
 	}
 
-	async get_port_vlan_config(port: number): Promise<Dot1qPortConfig> {
-		const json = await this.request<Dot1qPortConfigResponse>(`dot1q_sw_port_config?interface=${port}`)
-		return json.dot1q_sw_port_config
-	}
-
 	/**
-	 * Move a port onto a VLAN.
+	 * Set the port's own VLAN (its PVID).
 	 *
-	 * This sets the port's access VLAN, which is what moving an endpoint between VLANs means for
-	 * an access port. The rest of the switchport configuration is read first and sent back
-	 * unchanged, because the API requires all of it on a write.
+	 * This goes through `swcfg_port` rather than `dot1q_sw_port_config`: the latter validates the
+	 * allowed VLAN list on every write and rejects both the numeric form it reports on a read and
+	 * the documented `all` form ("Failed to set allowed vlan list"). `swcfg_port` carries the same
+	 * setting as `portVlanId`, is the endpoint the admin-mode write already uses successfully, and
+	 * is read back into the port's Access VLAN variable.
+	 *
+	 * VLAN membership is a separate concern, handled by `set_vlan_membership`.
 	 */
 	async set_port_vlan(port: number, vlan: number): Promise<void> {
-		const config = await this.get_port_vlan_config(port)
+		const config = await this.get_port_configuration(port)
 
-		await this.request(`dot1q_sw_port_config?interface=${port}`, {
+		await this.request(`swcfg_port?portid=${port}`, {
 			method: 'POST',
-			body: {
-				dot1q_sw_port_config: {
-					accessVlan: vlan,
-					allowedVlanList: config.allowedVlanList ?? ['all'],
-					configMode: config.configMode ?? 'access',
-					nativeVlan: config.nativeVlan ?? vlan,
-				},
-			},
+			body: { switchPortConfig: { ...config, portVlanId: vlan } },
 		})
 
-		this.log('debug', `Moved port ${port} to VLAN ${vlan}`)
+		this.log('debug', `Set port ${port} to VLAN ${vlan}`)
 	}
 
 	async get_vlan_membership(vlan: number): Promise<VlanMembership> {
@@ -543,9 +515,27 @@ class NetgearM4250 {
 
 		const portMembers = membership === 'excluded' ? others : [...others, { port, tagged: membership === 'tagged' }]
 
+		/*
+		 * The switch rejects a body that doesn't carry every member list, even when a list is
+		 * empty, and it omits empty lists from what it reports – so anything absent from the read
+		 * is filled in here. Defaults come first so that whatever the switch did report wins.
+		 */
+		const defaults = {
+			lagMembers: [],
+			trafficPrio: 0,
+			trafficPrioPortMem: [],
+			trafficPrioLagMem: [],
+			pvidMembers: [],
+		}
+
+		const filledIn = Object.keys(defaults).filter((key) => current[key] === undefined)
+		if (filledIn.length > 0) {
+			this.log('debug', `VLAN ${vlan} membership did not report ${filledIn.join(', ')}; sending empty values`)
+		}
+
 		await this.request('swcfg_vlan_membership', {
 			method: 'POST',
-			body: { vlanMembership: { ...current, vlanid: vlan, portMembers } },
+			body: { vlanMembership: { ...defaults, ...current, vlanid: vlan, portMembers } },
 		})
 
 		this.log(

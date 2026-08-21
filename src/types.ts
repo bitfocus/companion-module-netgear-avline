@@ -156,21 +156,6 @@ export function temperatureSensors(device: DeviceInfo): TemperatureSensor[] {
 	return (Array.isArray(sensors) ? sensors : [sensors]).filter((sensor) => typeof sensor?.sensorNum === 'number')
 }
 
-/** A port's VLAN switchport configuration, from `/dot1q_sw_port_config` */
-export interface Dot1qPortConfig {
-	interface?: number
-	accessVlan?: number
-	allowedVlanList?: string[]
-	/** `none`, `general`, `access`, `trunk`, `privateHost` or `privatePromisc` */
-	configMode?: string
-	nativeVlan?: number | string
-	[key: string]: unknown
-}
-
-export interface Dot1qPortConfigResponse extends ApiResponseEnvelope {
-	dot1q_sw_port_config: Dot1qPortConfig
-}
-
 /** SFP diagnostics, from `/fiber_optics` */
 export interface FiberOptic {
 	port: string
