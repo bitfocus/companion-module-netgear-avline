@@ -409,9 +409,10 @@ class NetgearM4250 {
 
 		const ports: PortConfig[] = []
 		for (let port = 1; port <= portCount; port++) {
-			const json = await this.request<PortConfigResponse>(`swcfg_port?portid=${port}`)
-			const config = json.switchPortConfig
+			const json = await this.optionalRequest<PortConfigResponse>(`swcfg_port?portid=${port}`)
+			if (json === null) break
 
+			const config = json.switchPortConfig
 			if (!Array.isArray(config)) ports.push({ ...config, ID: port })
 		}
 
@@ -432,7 +433,9 @@ class NetgearM4250 {
 			this.everSucceeded.add(path)
 			return json
 		} catch (error) {
-			if (!(error instanceof ApiError) || error instanceof UnauthorizedError) throw error
+			if (!(error instanceof ApiError) || error instanceof UnauthorizedError || error instanceof ForbiddenError) {
+				throw error
+			}
 
 			// An endpoint that has answered before is expected to keep answering, so a failure now
 			// is a real problem – not a switch that lacks the feature – and must not be swallowed

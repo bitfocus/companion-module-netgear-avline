@@ -15,13 +15,18 @@ const PRIVILEGE_HINT =
  * Companion would otherwise surface a rejected action as a bare error with a stack trace. A
  * refusal on grounds of privilege gets an explanation, because the usual cause is the connection
  * being configured with an account that can sign in but not make changes.
+ *
+ * Returns whether the calls succeeded, so that an action made of several writes can stop rather
+ * than carrying on from a failed one.
  */
-async function runAction(self: ModuleInstance, run: () => Promise<void>): Promise<void> {
+async function runAction(self: ModuleInstance, run: () => Promise<void>): Promise<boolean> {
 	try {
 		await run()
+		return true
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error)
 		self.log('error', error instanceof ForbiddenError ? `${message}. ${PRIVILEGE_HINT}` : message)
+		return false
 	}
 }
 
@@ -80,11 +85,9 @@ export function getActionDefinitions(self: ModuleInstance): CompanionActionDefin
 				await runAction(self, async () => {
 					switch (action.options.enabled) {
 						case 'true':
-						case true:
 							await self.switch.enable_poe_ports(ports)
 							break
 						case 'false':
-						case false:
 							await self.switch.disable_poe_ports(ports)
 							break
 						case 'toggle':
@@ -176,9 +179,15 @@ export function getActionDefinitions(self: ModuleInstance): CompanionActionDefin
 				// Membership is written before the port's own VLAN, because a switch can refuse to
 				// point a port at a VLAN it isn't a member of
 				if (mode === 'tagged' || mode === 'access') {
-					await runAction(self, async () =>
+					const written = await runAction(self, async () =>
 						self.switch.set_vlan_membership(port, vlan, mode === 'tagged' ? 'tagged' : 'untagged'),
 					)
+
+					// Pointing the port at a VLAN it failed to join would leave it stranded
+					if (!written) {
+						await self.refreshPortConfig(port)
+						return
+					}
 				}
 
 				if (mode === 'remove') {
