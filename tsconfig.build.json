@@ -1,0 +1,13 @@
+{
+	"extends": "@companion-module/tools/tsconfig/node22/recommended",
+	"include": ["src/**/*.ts"],
+	"exclude": ["node_modules/**"],
+	"compilerOptions": {
+		"alwaysStrict": true,
+		"rootDir": "./src",
+		"outDir": "./dist",
+		"paths": {},
+		"module": "Node16",
+		"moduleResolution": "Node16"
+	}
+}
