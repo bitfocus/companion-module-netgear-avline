@@ -288,8 +288,10 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			//
 			// Feedbacks are checked by id so that a PoE change doesn't also force every link status
 			// button to re-render.
-			if (changed.poe) this.checkFeedbacks('poeEnabled')
+			if (changed.poe) this.checkFeedbacks('poeEnabled', 'poeDelivering', 'poeFault')
 			if (changed.stats) this.checkFeedbacks('linkStatus')
+			if (changed.portConfig) this.checkFeedbacks('portEnabled', 'portVlan')
+			if (changed.fiber) this.checkFeedbacks('sfpFault')
 			this.updateVariables(changed)
 
 			this.setStatus(InstanceStatus.Ok, 'Connected')
@@ -510,6 +512,8 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			changedVars['firmware_version'] = device.swVer ?? ''
 			changedVars['total_ports'] = device.numOfPorts ?? ''
 			changedVars['fan_state'] = describeFanState(device.fanState)
+			changedVars['device_rx_bytes'] = device.rxData ?? ''
+			changedVars['device_tx_bytes'] = device.txData ?? ''
 
 			for (const sensor of temperatureSensors(device)) {
 				changedVars[`temperature_${sensor.sensorNum}`] = sensor.sensorTemp
@@ -532,6 +536,8 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			for (const port of this.poe_status?.all() ?? []) {
 				changedVars[`port_${port.portid}_poe_status`] = poeStatusLevels[port.status] ?? 'Unknown'
 				changedVars[`port_${port.portid}_poe_current_power`] = `${port.currentPower / 1000} W`
+				changedVars[`port_${port.portid}_poe_enabled`] = port.enable ? 'Enabled' : 'Disabled'
+				changedVars[`port_${port.portid}_poe_power_limit`] = `${port.powerLimit / 1000} W`
 			}
 		}
 
@@ -571,6 +577,7 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 				changedVars[`port_${port}_lldp_port_id`] = ''
 				changedVars[`port_${port}_lldp_port_description`] = ''
 				changedVars[`port_${port}_lldp_chassis_id`] = ''
+				changedVars[`port_${port}_lldp_system_description`] = ''
 			}
 
 			for (const device of this.lldp_devices) {
@@ -578,11 +585,13 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 				changedVars[`port_${device.ifIndex}_lldp_port_id`] = device.remotePortId ?? ''
 				changedVars[`port_${device.ifIndex}_lldp_port_description`] = device.remotePortDesc ?? ''
 				changedVars[`port_${device.ifIndex}_lldp_chassis_id`] = device.chassisId ?? ''
+				changedVars[`port_${device.ifIndex}_lldp_system_description`] = device.remoteSysDesc ?? ''
 			}
 		}
 
 		if (changed.stats) {
 			for (const port of this.port_stats?.all() ?? []) {
+				changedVars[`port_${port.portId}_link_status`] = port.status === 0 ? 'Up' : 'Down'
 				changedVars[`port_${port.portId}_speed`] = speedStatusLevels[port.speed] ?? 'Unknown'
 				changedVars[`port_${port.portId}_vlans`] = port.vlans.join(', ')
 			}

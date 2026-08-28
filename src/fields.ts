@@ -1,9 +1,13 @@
-import type { CompanionInputFieldNumber, CompanionInputFieldTextInput } from '@companion-module/base'
+import type {
+	CompanionInputFieldDropdown,
+	CompanionInputFieldNumber,
+	CompanionInputFieldTextInput,
+} from '@companion-module/base'
 
 /** VLAN ids the switch accepts */
 export const MIN_VLAN_ID = 1
 export const MAX_VLAN_ID = 4093
-import type { ModuleInstance } from './main.js'
+import { fibreModules, type ModuleInstance } from './main.js'
 
 /*
  * Port numbers are typed in rather than picked from a list, so the bounds are set from what the
@@ -54,5 +58,21 @@ export function portsField(): CompanionInputFieldTextInput {
 		id: 'ports',
 		default: '1',
 		tooltip: 'A port (7), a range (2-7), several of either (12-27, 31-33), or all',
+	}
+}
+
+/*
+ * Fibre ports are reported as free-form strings such as `1/0/49`, so they are picked from a list
+ * rather than typed. A switch with no transceivers fitted still needs a usable field.
+ */
+export function fibrePortField(self: ModuleInstance): CompanionInputFieldDropdown {
+	const choices = fibreModules(self.fiber_optics).map((module) => ({ id: module.port, label: `SFP ${module.port}` }))
+
+	return {
+		type: 'dropdown',
+		label: 'SFP Port',
+		id: 'port',
+		default: choices[0]?.id ?? '',
+		choices: choices.length > 0 ? choices : [{ id: '', label: 'No transceivers detected' }],
 	}
 }

@@ -15,6 +15,8 @@ export function getVariableDefinitions(self: ModuleInstance): CompanionVariableD
 		{ name: 'Firmware Version', variableId: 'firmware_version' },
 		{ name: 'Total Ports', variableId: 'total_ports' },
 		{ name: 'Fan State', variableId: 'fan_state' },
+		{ name: 'Device RX Bytes', variableId: 'device_rx_bytes' },
+		{ name: 'Device TX Bytes', variableId: 'device_tx_bytes' },
 		{ name: 'POE Total Consumption', variableId: 'poe_total_consumption' },
 		{ name: 'POE Total Consumption (Watts)', variableId: 'poe_total_consumption_watts' },
 		{ name: 'POE Usage Threshold (%)', variableId: 'poe_usage_threshold' },
@@ -46,6 +48,10 @@ export function getVariableDefinitions(self: ModuleInstance): CompanionVariableD
 		variables.push({ name: `Port ${port} - LLDP Port ID`, variableId: `port_${port}_lldp_port_id` })
 		variables.push({ name: `Port ${port} - LLDP Port Description`, variableId: `port_${port}_lldp_port_description` })
 		variables.push({ name: `Port ${port} - LLDP Chassis ID`, variableId: `port_${port}_lldp_chassis_id` })
+		variables.push({
+			name: `Port ${port} - LLDP System Description`,
+			variableId: `port_${port}_lldp_system_description`,
+		})
 	}
 
 	for (const port of self.port_config?.all() ?? []) {
@@ -64,6 +70,7 @@ export function getVariableDefinitions(self: ModuleInstance): CompanionVariableD
 	}
 
 	for (const port of self.port_stats?.all() ?? []) {
+		variables.push({ name: `Port ${port.portId} - Link Status`, variableId: `port_${port.portId}_link_status` })
 		variables.push({ name: `Port ${port.portId} - Speed`, variableId: `port_${port.portId}_speed` })
 		variables.push({ name: `Port ${port.portId} - VLAN Membership`, variableId: `port_${port.portId}_vlans` })
 		variables.push({ name: `Port ${port.portId} - RX (Mbps)`, variableId: `port_${port.portId}_rx_mbps` })
@@ -75,6 +82,8 @@ export function getVariableDefinitions(self: ModuleInstance): CompanionVariableD
 	for (const port of self.poe_status?.all() ?? []) {
 		variables.push({ name: `Port ${port.portid} - POE Status`, variableId: `port_${port.portid}_poe_status` })
 		variables.push({ name: `Port ${port.portid} - POE Draw`, variableId: `port_${port.portid}_poe_current_power` })
+		variables.push({ name: `Port ${port.portid} - POE Enabled`, variableId: `port_${port.portid}_poe_enabled` })
+		variables.push({ name: `Port ${port.portid} - POE Power Limit`, variableId: `port_${port.portid}_poe_power_limit` })
 	}
 
 	return variables
