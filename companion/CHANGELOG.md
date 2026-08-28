@@ -14,12 +14,16 @@
 - Added
   - Actions: Set Port Enabled, Save Configuration, Reboot Switch (now with an option to save
     configuration first)
-  - Feedback: Port Enabled, Port VLAN
+  - Feedback: Port Enabled, Port VLAN, POE Delivering Power, POE Fault, SFP Fault
   - Variables: device name, model, serial number, firmware version, total ports, fan state, POE consumption and usage threshold, per-port description, POE
-    capability, admin mode, access VLAN, RX/TX bandwidth and byte counters, LLDP neighbor
+    capability, admin mode, access VLAN, link status, RX/TX bandwidth and byte counters,
+    switch-wide RX/TX byte counters, per-port POE enabled state and power limit, LLDP neighbor
     info, per-sensor temperature, and per-SFP-module diagnostics
   - Presets: per-port and switch-wide status read-outs, grouped under text headers, plus
     presets for the new port-enable, VLAN, and save/reboot actions
+- Fixed
+  - Port Enabled and Port VLAN feedbacks now refresh when the port configuration changes on the
+    switch itself, instead of only after the module writes to a port
 
 ## v1.2.3
 
