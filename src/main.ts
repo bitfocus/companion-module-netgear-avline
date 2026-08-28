@@ -6,16 +6,21 @@ import { getFeedbackDefinitions } from './feedbacks.js'
 import { upgradeScripts } from './upgrades.js'
 import { getConfigFields, type ModuleConfig, type ModuleSecrets } from './config.js'
 import { poeStatusLevels, speedStatusLevels, temperatureSensorStates } from './constants.js'
-import { NetgearM4250, type PortConfigurationMap, type PortPoeConfigurationMap, type PortStatsMap } from './switch.js'
+import {
+	ApiError,
+	NetgearM4250,
+	UnauthorizedError,
+	type PortConfigurationMap,
+	type PortPoeConfigurationMap,
+	type PortStatsMap,
+} from './switch.js'
 import { temperatureSensors, type DeviceInfo, type FiberOptic, type LldpRemoteDevice, type PoeConfig } from './types.js'
 
 /*
- * Only the PoE port configuration and the port statistics drive feedbacks, so only they are
- * fetched on every pass. Everything else is either slow-moving (cpu, memory, temperature) or
- * fixed for the lifetime of the switch (model, serial number), and polling it at the same rate
- * would triple the request load for no visible benefit.
+ * Only PoE config and port statistics drive feedbacks, so only they are polled fast; the rest is
+ * slow-moving or fixed. The switch's REST agent struggles under a sustained once-a-second poll.
  */
-const FAST_POLL_INTERVAL_MS = 1000
+const FAST_POLL_INTERVAL_MS = 2000
 const DEVICE_INFO_POLL_INTERVAL_MS = 5000
 const POE_CONFIG_POLL_INTERVAL_MS = 30000
 
@@ -24,6 +29,12 @@ const MAX_FAILURE_BACKOFF_MS = 10000
 
 /** Consecutive failed passes before the session is thrown away and re-established */
 const FAILURES_BEFORE_RELOGIN = 3
+
+/*
+ * Consecutive failed passes before the connection is reported as down. Switches drop the odd
+ * request under load, and reporting a single miss as a disconnect made the connection flap.
+ */
+const FAILURES_BEFORE_DISCONNECT = 3
 
 /** Which parts of the switch data changed on the last pass */
 interface ChangedData {
@@ -82,6 +93,15 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		traffic: '',
 	}
 
+	/** The system name from the `device_name` endpoint, for switches that omit it from device info */
+	private deviceName: string | undefined
+
+	/** The fibre ports the published variable definitions were built for */
+	private lastFibrePorts = ''
+
+	/** The last status pushed to Companion, so an unchanged one isn't re-emitted on every poll */
+	private lastStatus: string | undefined
+
 	private consecutiveFailures = 0
 	private pollInFlight = false
 	private refreshQueued = false
@@ -112,7 +132,10 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	 */
 	applyConfig(config: ModuleConfig, secrets: ModuleSecrets): void {
 		this.stopPolling()
-		this.updateStatus(InstanceStatus.Connecting, 'Opening connection')
+
+		// A reconfigure should re-announce its progress, even if it lands on the same status
+		this.lastStatus = undefined
+		this.setStatus(InstanceStatus.Connecting, 'Opening connection')
 
 		// Releasing the previous session talks to the switch, so it must not be awaited either
 		const previous = this.switch
@@ -124,6 +147,8 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 		this.deviceInfoFetchedAt = 0
 		this.poeConfigFetchedAt = 0
+		this.deviceName = undefined
+		this.lastFibrePorts = ''
 		this.lastSeen = {
 			poe: '',
 			stats: '',
@@ -171,11 +196,11 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	 */
 	private async connect(generation: number): Promise<void> {
 		try {
-			this.updateStatus(InstanceStatus.Connecting, 'Logging in')
+			this.setStatus(InstanceStatus.Connecting, 'Logging in')
 			await this.switch.login()
 			if (generation !== this.generation) return
 
-			this.updateStatus(InstanceStatus.Connecting, 'Refreshing data')
+			this.setStatus(InstanceStatus.Connecting, 'Refreshing data')
 			await this.fetchSwitchData()
 			if (generation !== this.generation) return
 
@@ -187,7 +212,7 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			if (generation !== this.generation) return
 
 			// Only mark the connection as `Ok` once we've successfully fetched data the first time
-			this.updateStatus(InstanceStatus.Ok, 'Connected')
+			this.setStatus(InstanceStatus.Ok, 'Connected')
 			this.consecutiveFailures = 0
 
 			// Setup the actions, feedbacks, and variables now that we have data for them
@@ -202,9 +227,21 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			if (generation !== this.generation) return
 
 			this.log('error', `Unable to connect: ${describeError(error)}`)
-			this.updateStatus(InstanceStatus.ConnectionFailure, 'Unable to log in')
+			this.setStatus(InstanceStatus.ConnectionFailure, 'Unable to log in')
 			this.scheduleNextRun(generation, this.failureBackoff(), true)
 		}
+	}
+
+	/*
+	 * The poll loop reaches the same status every pass, and re-emitting it fills the connection
+	 * log with identical lines. Only transitions are worth reporting.
+	 */
+	private setStatus(status: InstanceStatus, message: string): void {
+		const key = `${status}: ${message}`
+		if (key === this.lastStatus) return
+
+		this.lastStatus = key
+		this.updateStatus(status, message)
 	}
 
 	private scheduleNextRun(generation: number, delay: number, reconnect = false): void {
@@ -255,14 +292,19 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			if (changed.stats) this.checkFeedbacks('linkStatus')
 			this.updateVariables(changed)
 
-			this.updateStatus(InstanceStatus.Ok, 'Connected')
+			this.setStatus(InstanceStatus.Ok, 'Connected')
 			this.consecutiveFailures = 0
 		} catch (error) {
 			if (generation !== this.generation) return
 
-			this.log('error', `Unable to refresh switch data: ${describeError(error)}`)
-			this.updateStatus(InstanceStatus.ConnectionFailure, 'Unable to refresh switch data')
 			delay = this.failureBackoff()
+
+			if (this.consecutiveFailures >= FAILURES_BEFORE_DISCONNECT) {
+				this.log('error', `Unable to refresh switch data: ${describeError(error)}`)
+				this.setStatus(InstanceStatus.ConnectionFailure, 'Unable to refresh switch data')
+			} else {
+				this.log('debug', `Refresh failed, retrying: ${describeError(error)}`)
+			}
 
 			// The switch only names an expired token some of the time, so rather than guessing from
 			// the message, a run of failures is taken as reason enough to log in again
@@ -315,32 +357,89 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		}
 
 		if (now - this.deviceInfoFetchedAt >= DEVICE_INFO_POLL_INTERVAL_MS) {
-			this.device_status = await this.switch.get_device_status()
+			await this.tolerate('device_info', async () => {
+				this.device_status = await this.switch.get_device_status()
+				changed.device = this.hasChanged('device', this.device_status)
+
+				await this.fillInDeviceName(this.device_status)
+			})
+
 			this.deviceInfoFetchedAt = now
-			changed.device = this.hasChanged('device', this.device_status)
 		}
 
 		if (now - this.poeConfigFetchedAt >= POE_CONFIG_POLL_INTERVAL_MS) {
-			this.poe_config = (await this.switch.get_poe_config()) ?? undefined
-			this.poeConfigFetchedAt = now
-			changed.poeConfig = this.hasChanged('poeConfig', this.poe_config)
+			await this.tolerate('poe_config', async () => {
+				this.poe_config = (await this.switch.get_poe_config()) ?? undefined
+				changed.poeConfig = this.hasChanged('poeConfig', this.poe_config)
+			})
 
 			// Port configuration is refreshed on the same slow tier, but only when the switch can
 			// return every port at once – otherwise it would be a request per port
 			if (this.switch.bulk_port_config_supported) {
-				this.port_config = await this.switch.get_port_configurations(this.portCount())
-				changed.portConfig = this.hasChanged('portConfig', this.port_config.all())
+				await this.tolerate('swcfg_port', async () => {
+					this.port_config = await this.switch.get_port_configurations(this.portCount())
+					changed.portConfig = this.hasChanged('portConfig', this.port_config.all())
+				})
 			}
 
 			// Transceiver diagnostics and LLDP neighbours move slowly too, and each is one request
-			this.fiber_optics = await this.switch.get_fiber_optics()
-			changed.fiber = this.hasChanged('fiber', this.fiber_optics)
+			await this.tolerate('fiber_optics', async () => {
+				this.fiber_optics = await this.switch.get_fiber_optics()
+				changed.fiber = this.hasChanged('fiber', this.fiber_optics)
+			})
 
-			this.lldp_devices = await this.switch.get_lldp_remote_devices()
-			changed.lldp = this.hasChanged('lldp', this.lldp_devices)
+			await this.tolerate('lldp_remote_devices', async () => {
+				this.lldp_devices = await this.switch.get_lldp_remote_devices()
+				changed.lldp = this.hasChanged('lldp', this.lldp_devices)
+			})
+
+			this.poeConfigFetchedAt = now
 		}
 
+		// Transceivers can be fitted and pulled while the module is running, so the SFP variables
+		// a switch offers aren't fixed at connect time
+		if (changed.fiber) this.republishVariableDefinitions()
+
 		return changed
+	}
+
+	/*
+	 * Run one step of a polling pass, keeping the last known values if a supplementary endpoint
+	 * fails. A rejected token is not absorbed: the poll loop has to see it to log back in.
+	 */
+	private async tolerate(what: string, step: () => Promise<void>): Promise<void> {
+		try {
+			await step()
+		} catch (error) {
+			if (!(error instanceof ApiError) || error instanceof UnauthorizedError) throw error
+
+			this.log('debug', `Keeping the last ${what}: ${describeError(error)}`)
+		}
+	}
+
+	/*
+	 * Some models serve the system name from `device_name` instead of `device_info`. It only
+	 * changes on a rename, so it is asked for once and folded into the device info.
+	 */
+	private async fillInDeviceName(device: DeviceInfo): Promise<void> {
+		if (device.name !== undefined && device.name !== '') return
+
+		this.deviceName ??= (await this.switch.get_device_name()) ?? ''
+		if (this.deviceName === '') return
+
+		device.name = this.deviceName
+	}
+
+	/*
+	 * Republish variable definitions so hardware added since connecting gets variables. Companion
+	 * treats this as a wholesale replacement, so only do it when the set has really changed.
+	 */
+	private republishVariableDefinitions(): void {
+		const fibrePorts = this.fiber_optics.map((module) => module.port).join(',')
+		if (fibrePorts === this.lastFibrePorts) return
+
+		this.lastFibrePorts = fibrePorts
+		this.setVariableDefinitions(getVariableDefinitions(this))
 	}
 
 	/*
@@ -410,9 +509,7 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			changedVars['serial_number'] = device.serialNumber ?? ''
 			changedVars['firmware_version'] = device.swVer ?? ''
 			changedVars['total_ports'] = device.numOfPorts ?? ''
-			changedVars['last_reboot'] = device.lastReboot ?? ''
 			changedVars['fan_state'] = describeFanState(device.fanState)
-			changedVars['poe_budget'] = device.adminPoePower === undefined ? '' : `${device.adminPoePower / 1000} W`
 
 			for (const sensor of temperatureSensors(device)) {
 				changedVars[`temperature_${sensor.sensorNum}`] = sensor.sensorTemp
@@ -422,7 +519,11 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		}
 
 		if (changed.poeConfig && this.poe_config) {
-			changedVars['poe_total_consumption'] = `${this.poe_config.totalPowerConsumedWatts ?? '0'} W`
+			const consumedWatts = asNumber(this.poe_config.totalPowerConsumedWatts) ?? 0
+
+			changedVars['poe_total_consumption'] = `${consumedWatts} W`
+			changedVars['poe_total_consumption_watts'] = consumedWatts
+			changedVars['poe_usage_threshold'] = asNumber(this.poe_config.usageThreshold) ?? ''
 			changedVars['poe_main_status'] = this.poe_config.pseMainOperationStatus ?? ''
 			changedVars['poe_power_management_mode'] = this.poe_config.powerManagmentMode ?? ''
 		}
@@ -437,7 +538,7 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		if (changed.portConfig) {
 			for (const port of this.port_config?.all() ?? []) {
 				changedVars[`port_${port.ID}_description`] = port.description ?? ''
-				changedVars[`port_${port.ID}_is_poe`] = port.isPoE ?? false
+				changedVars[`port_${port.ID}_poe_capable`] = port.isPoE ?? false
 				changedVars[`port_${port.ID}_admin_mode`] =
 					port.adminMode === undefined ? '' : port.adminMode ? 'Enabled' : 'Disabled'
 				changedVars[`port_${port.ID}_access_vlan`] = port.portVlanId ?? ''
@@ -447,7 +548,7 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		}
 
 		if (changed.fiber) {
-			for (const module of this.fiber_optics) {
+			for (const module of fibreModules(this.fiber_optics)) {
 				const id = fiberVariableId(module.port)
 
 				changedVars[`sfp_${id}_temperature`] = module.temp ?? ''
@@ -504,6 +605,22 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 /* The switch reports fibre ports as free-form strings such as `1/0/49`, which can't be used as-is */
 export function fiberVariableId(port: string): string {
 	return String(port).replace(/[^a-zA-Z0-9]+/g, '_')
+}
+
+/*
+ * Transceivers the module can name. An entry without a port can't be turned into a variable id –
+ * it would produce `sfp_undefined_temperature` – and has nothing useful to show either.
+ */
+export function fibreModules(modules: FiberOptic[]): FiberOptic[] {
+	return modules.filter((module) => module.port !== undefined && module.port !== '')
+}
+
+/* Firmware is inconsistent about whether a figure arrives as a number or as a string */
+function asNumber(value: unknown): number | null {
+	if (value === undefined || value === null || value === '') return null
+
+	const number = Number(value)
+	return Number.isFinite(number) ? number : null
 }
 
 /* Documented as an array of objects, but firmware has been seen to send a bare string */

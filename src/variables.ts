@@ -1,6 +1,6 @@
 import type { CompanionVariableDefinition } from '@companion-module/base'
 import type { ModuleInstance } from './main.js'
-import { fiberVariableId } from './main.js'
+import { fiberVariableId, fibreModules } from './main.js'
 import { temperatureSensors } from './types.js'
 
 export function getVariableDefinitions(self: ModuleInstance): CompanionVariableDefinition[] {
@@ -14,16 +14,16 @@ export function getVariableDefinitions(self: ModuleInstance): CompanionVariableD
 		{ name: 'Serial Number', variableId: 'serial_number' },
 		{ name: 'Firmware Version', variableId: 'firmware_version' },
 		{ name: 'Total Ports', variableId: 'total_ports' },
-		{ name: 'Last Reboot', variableId: 'last_reboot' },
 		{ name: 'Fan State', variableId: 'fan_state' },
-		{ name: 'POE Budget', variableId: 'poe_budget' },
 		{ name: 'POE Total Consumption', variableId: 'poe_total_consumption' },
+		{ name: 'POE Total Consumption (Watts)', variableId: 'poe_total_consumption_watts' },
+		{ name: 'POE Usage Threshold (%)', variableId: 'poe_usage_threshold' },
 		{ name: 'POE Main Status', variableId: 'poe_main_status' },
 		{ name: 'POE Power Management Mode', variableId: 'poe_power_management_mode' },
 		{ name: 'POE Capable Ports', variableId: 'poe_ports' },
 	]
 
-	for (const module of self.fiber_optics) {
+	for (const module of fibreModules(self.fiber_optics)) {
 		const id = fiberVariableId(module.port)
 		const label = `SFP ${module.port}`
 
@@ -50,7 +50,7 @@ export function getVariableDefinitions(self: ModuleInstance): CompanionVariableD
 
 	for (const port of self.port_config?.all() ?? []) {
 		variables.push({ name: `Port ${port.ID} - Description`, variableId: `port_${port.ID}_description` })
-		variables.push({ name: `Port ${port.ID} - POE Capable`, variableId: `port_${port.ID}_is_poe` })
+		variables.push({ name: `Port ${port.ID} - POE Capable`, variableId: `port_${port.ID}_poe_capable` })
 		variables.push({ name: `Port ${port.ID} - Admin Mode`, variableId: `port_${port.ID}_admin_mode` })
 		variables.push({ name: `Port ${port.ID} - Access VLAN`, variableId: `port_${port.ID}_access_vlan` })
 	}

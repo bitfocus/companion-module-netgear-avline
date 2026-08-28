@@ -175,11 +175,7 @@ function addSwitchStatusPresets(self: ModuleInstance, presets: CompanionPresetDe
 		'Ports',
 		`$(${LABEL}:active_ports)/$(${LABEL}:total_ports)`,
 	])
-	presets['switch_poe_usage'] = status('Switch Status', 'POE Consumption', [
-		'POE',
-		`$(${LABEL}:poe_total_consumption)`,
-		`of $(${LABEL}:poe_budget)`,
-	])
+	presets['switch_poe_usage'] = status('Switch Status', 'POE Consumption', ['POE', `$(${LABEL}:poe_total_consumption)`])
 
 	for (const sensor of self.device_status ? temperatureSensors(self.device_status) : []) {
 		const number = sensor.sensorNum

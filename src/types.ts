@@ -125,7 +125,6 @@ export interface DeviceInfo {
 	serialNumber?: string
 	swVer?: string
 	numOfPorts?: number
-	lastReboot?: string
 	poeState?: boolean
 	/** The switch's PoE budget, in milliwatts */
 	adminPoePower?: number

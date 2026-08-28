@@ -25,7 +25,7 @@ import type {
 export type SwitchLogger = (level: LogLevel, message: string) => void
 
 const API_PORT = 8443
-const REQUEST_TIMEOUT_MS = 5000
+const REQUEST_TIMEOUT_MS = 10000
 
 // Log back in this long before the token is due to expire
 const TOKEN_REFRESH_MARGIN_MS = 60 * 1000
@@ -37,8 +37,11 @@ const TOKEN_REFRESH_MARGIN_MS = 60 * 1000
  */
 const LOGOUT_TIMEOUT_MS = 1500
 
-// How long an idle connection is held open for reuse between polls
-const KEEP_ALIVE_TIMEOUT_MS = 60 * 1000
+/*
+ * How long an idle connection is held open for reuse. Kept below the switch's own idle timeout:
+ * a socket it closes first fails with a bare `fetch failed` before reaching the switch.
+ */
+const KEEP_ALIVE_TIMEOUT_MS = 30 * 1000
 
 export type VlanPortMembership = 'tagged' | 'untagged' | 'excluded'
 
@@ -93,11 +96,8 @@ class NetgearM4250 {
 		this.password = password
 		this.log = log
 
-		// The switch serves its API over a self-signed certificate.
-		//
-		// The keep-alive window is stretched well past undici's 4s default so that the slower
-		// polls – device info every few seconds, switch PoE state every thirty – reuse the
-		// connection instead of paying for a TLS handshake each time.
+		// The switch serves its API over a self-signed certificate. The keep-alive window is
+		// stretched past undici's 4s default so the slower polls can reuse the connection.
 		this.agent = new Agent({
 			connect: { rejectUnauthorized: false },
 			keepAliveTimeout: KEEP_ALIVE_TIMEOUT_MS,
@@ -187,13 +187,22 @@ class NetgearM4250 {
 		try {
 			return await this.performRequest<T>(path, method, body, authenticated, timeoutMs)
 		} catch (error) {
-			if (!authenticated || !retryOnAuthFailure || !(error instanceof UnauthorizedError)) throw error
+			if (authenticated && retryOnAuthFailure && error instanceof UnauthorizedError) {
+				this.log('info', 'Login token became invalid, refreshing')
+				this.token = null
+				await this.login()
 
-			this.log('info', 'Login token became invalid, refreshing')
-			this.token = null
-			await this.login()
+				return this.performRequest<T>(path, method, body, authenticated, timeoutMs)
+			}
 
-			return this.performRequest<T>(path, method, body, authenticated, timeoutMs)
+			// A read that never reached the switch is retried once, the usual cause being a pooled
+			// connection closed while idle. A write isn't: it may already have been acted on.
+			if (method === 'GET' && isTransportFailure(error)) {
+				this.log('debug', `${method} ${path} did not reach the switch, retrying once`)
+				return this.performRequest<T>(path, method, body, authenticated, timeoutMs)
+			}
+
+			throw error
 		}
 	}
 
@@ -215,19 +224,32 @@ class NetgearM4250 {
 		authenticated: boolean,
 		timeoutMs: number = REQUEST_TIMEOUT_MS,
 	): Promise<T> {
-		const response = await fetch(`https://${this.url_or_ip_address}:${API_PORT}/api/v1/${path}`, {
-			method,
-			dispatcher: this.agent,
-			signal: AbortSignal.timeout(timeoutMs),
-			headers: {
-				Accept: 'application/json',
-				'Content-Type': 'application/json',
-				...(authenticated ? { Authorization: `Bearer ${this.token}` } : {}),
-			},
-			body: body === undefined ? undefined : JSON.stringify(body),
-		})
+		/*
+		 * One deadline covers the whole exchange: firmware has been seen to answer promptly and
+		 * then stall mid-body, which `AbortSignal.timeout` on `fetch` alone would never interrupt.
+		 */
+		const deadline = new AbortController()
+		const expiry = setTimeout(() => deadline.abort(new Error('The operation was aborted due to timeout')), timeoutMs)
 
-		const responseBody = await response.text()
+		let response
+		let responseBody: string
+		try {
+			response = await fetch(`https://${this.url_or_ip_address}:${API_PORT}/api/v1/${path}`, {
+				method,
+				dispatcher: this.agent,
+				signal: deadline.signal,
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+					...(authenticated ? { Authorization: `Bearer ${this.token}` } : {}),
+				},
+				body: body === undefined ? undefined : JSON.stringify(body),
+			})
+
+			responseBody = await response.text()
+		} finally {
+			clearTimeout(expiry)
+		}
 
 		if (response.status === 403) {
 			throw new ForbiddenError(`${method} ${path} was refused (403): this account may not be allowed to do that`)
@@ -423,20 +445,28 @@ class NetgearM4250 {
 	private async optionalRequest<T extends ApiResponseEnvelope>(path: string): Promise<T | null> {
 		try {
 			const json = await this.request<T>(path)
+
+			if (this.unsupported.delete(path)) this.log('info', `Switch is answering ${path} again`)
 			this.everSucceeded.add(path)
+
 			return json
 		} catch (error) {
 			if (!(error instanceof ApiError) || error instanceof UnauthorizedError || error instanceof ForbiddenError) {
 				throw error
 			}
 
-			// An endpoint that has answered before is expected to keep answering, so a failure now
-			// is a real problem – not a switch that lacks the feature – and must not be swallowed
-			if (this.everSucceeded.has(path)) throw error
-
+			/*
+			 * Reported once per transition, at a level reflecting what happened: an endpoint that
+			 * never answered is a missing feature, one that stopped answering is worth a warning.
+			 */
 			if (!this.unsupported.has(path)) {
 				this.unsupported.add(path)
-				this.log('debug', `Switch does not provide ${path}: ${error.message}`)
+
+				if (this.everSucceeded.has(path)) {
+					this.log('warn', `Switch stopped providing ${path}: ${error.message}`)
+				} else {
+					this.log('debug', `Switch does not provide ${path}: ${error.message}`)
+				}
 			}
 
 			return null
@@ -586,15 +616,27 @@ class NetgearM4250 {
 		await this.request('config_copy?directive=rtos', { method: 'POST' })
 	}
 
-	async get_device_name(): Promise<string> {
-		const json = await this.request<DeviceNameResponse>('device_name')
-		return json.deviceName.name
+	/**
+	 * The configured system name, a fallback for models that omit it from `device_info`. Optional:
+	 * a switch offering neither shouldn't fail the whole poll over a cosmetic variable.
+	 */
+	async get_device_name(): Promise<string | null> {
+		const json = await this.optionalRequest<DeviceNameResponse>('device_name')
+		return json?.deviceName?.name ?? null
 	}
 
 	async get_device_status(): Promise<DeviceInfo> {
 		const json = await this.request<DeviceInfoResponse>('device_info')
 		return json.deviceInfo
 	}
+}
+
+/**
+ * Whether a request failed before the switch could answer it. `fetch` reports these as a plain
+ * `TypeError`; an expired deadline doesn't count, as the switch was reached, just slowly.
+ */
+function isTransportFailure(error: unknown): boolean {
+	return error instanceof TypeError && error.message.includes('fetch failed')
 }
 
 /**
@@ -678,4 +720,12 @@ class PortStatsMap {
 	}
 }
 
-export { ApiError, ForbiddenError, NetgearM4250, PortConfigurationMap, PortPoeConfigurationMap, PortStatsMap }
+export {
+	ApiError,
+	ForbiddenError,
+	NetgearM4250,
+	UnauthorizedError,
+	PortConfigurationMap,
+	PortPoeConfigurationMap,
+	PortStatsMap,
+}
