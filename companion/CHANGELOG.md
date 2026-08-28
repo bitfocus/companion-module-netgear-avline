@@ -15,8 +15,7 @@
   - Actions: Set Port Enabled, Save Configuration, Reboot Switch (now with an option to save
     configuration first)
   - Feedback: Port Enabled, Port VLAN
-  - Variables: device name, model, serial number, firmware version, total ports, last
-    reboot, fan state, POE budget/consumption/status, per-port description, POE
+  - Variables: device name, model, serial number, firmware version, total ports, fan state, POE consumption and usage threshold, per-port description, POE
     capability, admin mode, access VLAN, RX/TX bandwidth and byte counters, LLDP neighbor
     info, per-sensor temperature, and per-SFP-module diagnostics
   - Presets: per-port and switch-wide status read-outs, grouped under text headers, plus
