@@ -15,6 +15,7 @@ import {
 	type PortStatsMap,
 } from './switch.js'
 import { temperatureSensors, type DeviceInfo, type FiberOptic, type LldpRemoteDevice, type PoeConfig } from './types.js'
+import { fiberVariableId, fibreModules } from './fiber.js'
 
 /*
  * Only PoE config and port statistics drive feedbacks, so only they are polled fast; the rest is
@@ -207,7 +208,7 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			// Needed before the definitions are built, so that port fields can be bounded to the
 			// ports this switch actually has
 			this.port_config = await this.switch.get_port_configurations(this.portCount())
-			this.fiber_optics = await this.switch.get_fiber_optics()
+			this.fiber_optics = (await this.switch.get_fiber_optics()) ?? []
 			this.lldp_devices = await this.switch.get_lldp_remote_devices()
 			if (generation !== this.generation) return
 
@@ -386,7 +387,12 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 			// Transceiver diagnostics and LLDP neighbours move slowly too, and each is one request
 			await this.tolerate('fiber_optics', async () => {
-				this.fiber_optics = await this.switch.get_fiber_optics()
+				const modules = await this.switch.get_fiber_optics()
+				// A model may intermittently answer "FiberOptics not found". Keep the last
+				// diagnostics and definitions instead of briefly removing every SFP variable.
+				if (modules === null) return
+
+				this.fiber_optics = modules
 				changed.fiber = this.hasChanged('fiber', this.fiber_optics)
 			})
 
@@ -609,19 +615,6 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 		if (Object.keys(changedVars).length > 0) this.setVariableValues(changedVars)
 	}
-}
-
-/* The switch reports fibre ports as free-form strings such as `1/0/49`, which can't be used as-is */
-export function fiberVariableId(port: string): string {
-	return String(port).replace(/[^a-zA-Z0-9]+/g, '_')
-}
-
-/*
- * Transceivers the module can name. An entry without a port can't be turned into a variable id –
- * it would produce `sfp_undefined_temperature` – and has nothing useful to show either.
- */
-export function fibreModules(modules: FiberOptic[]): FiberOptic[] {
-	return modules.filter((module) => module.port !== undefined && module.port !== '')
 }
 
 /* Firmware is inconsistent about whether a figure arrives as a number or as a string */

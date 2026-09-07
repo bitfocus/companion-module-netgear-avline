@@ -21,6 +21,7 @@ import type {
 	VlanMembership,
 	VlanMembershipResponse,
 } from './types.js'
+import { normaliseFiberOptic } from './fiber.js'
 
 export type SwitchLogger = (level: LogLevel, message: string) => void
 
@@ -577,12 +578,12 @@ class NetgearM4250 {
 	}
 
 	/** SFP diagnostics for every fibre port */
-	async get_fiber_optics(): Promise<FiberOptic[]> {
+	async get_fiber_optics(): Promise<FiberOptic[] | null> {
 		const json = await this.optionalRequest<FiberOpticsResponse>('fiber_optics')
 		const modules = json?.fiber_optics
 
-		if (!modules) return []
-		return Array.isArray(modules) ? modules : [modules]
+		if (!modules) return null
+		return (Array.isArray(modules) ? modules : [modules]).map(normaliseFiberOptic).filter((module) => module !== null)
 	}
 
 	/** Devices seen by LLDP, keyed by the interface they were seen on */

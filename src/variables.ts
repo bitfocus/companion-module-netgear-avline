@@ -1,6 +1,6 @@
 import type { CompanionVariableDefinition } from '@companion-module/base'
 import type { ModuleInstance } from './main.js'
-import { fiberVariableId, fibreModules } from './main.js'
+import { fiberVariableId, fibreModules } from './fiber.js'
 import { temperatureSensors } from './types.js'
 
 export function getVariableDefinitions(self: ModuleInstance): CompanionVariableDefinition[] {

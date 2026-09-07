@@ -7,7 +7,8 @@ import type {
 /** VLAN ids the switch accepts */
 export const MIN_VLAN_ID = 1
 export const MAX_VLAN_ID = 4093
-import { fibreModules, type ModuleInstance } from './main.js'
+import { fibreModules } from './fiber.js'
+import type { ModuleInstance } from './main.js'
 
 /*
  * Port numbers are typed in rather than picked from a list, so the bounds are set from what the

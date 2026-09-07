@@ -4,7 +4,7 @@ import {
 	type CompanionPresetDefinitions,
 	type CompanionTextPresetDefinition,
 } from '@companion-module/base'
-import { fiberVariableId } from './main.js'
+import { fiberVariableId } from './fiber.js'
 import type { ModuleInstance } from './main.js'
 import { temperatureSensors } from './types.js'
 
