@@ -207,7 +207,7 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			// Needed before the definitions are built, so that port fields can be bounded to the
 			// ports this switch actually has
 			this.port_config = await this.switch.get_port_configurations(this.portCount())
-			this.fiber_optics = await this.switch.get_fiber_optics()
+			this.fiber_optics = (await this.switch.get_fiber_optics()) ?? []
 			this.lldp_devices = await this.switch.get_lldp_remote_devices()
 			if (generation !== this.generation) return
 
@@ -386,7 +386,12 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 
 			// Transceiver diagnostics and LLDP neighbours move slowly too, and each is one request
 			await this.tolerate('fiber_optics', async () => {
-				this.fiber_optics = await this.switch.get_fiber_optics()
+				const modules = await this.switch.get_fiber_optics()
+				// A model may intermittently answer "FiberOptics not found". Keep the last
+				// diagnostics and definitions instead of briefly removing every SFP variable.
+				if (modules === null) return
+
+				this.fiber_optics = modules
 				changed.fiber = this.hasChanged('fiber', this.fiber_optics)
 			})
 

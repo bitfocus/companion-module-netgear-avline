@@ -158,6 +158,8 @@ export function temperatureSensors(device: DeviceInfo): TemperatureSensor[] {
 /** SFP diagnostics, from `/fiber_optics` */
 export interface FiberOptic {
 	port: string
+	/** Full interface name reported by newer firmware, for example `1/0/20` or `0/11` */
+	portName?: string
 	temp?: string
 	voltage?: string
 	current?: string
@@ -174,7 +176,15 @@ export interface FiberOptic {
 
 export interface FiberOpticsResponse extends ApiResponseEnvelope {
 	/** An array in practice, though the spec describes a single module */
-	fiber_optics: FiberOptic[] | FiberOptic
+	fiber_optics: RawFiberOptic[] | RawFiberOptic
+}
+
+/** Firmware field names before they are normalised for the rest of the module */
+export interface RawFiberOptic extends Omit<FiberOptic, 'port'> {
+	port?: string | number
+	portName?: string
+	temp?: string | number
+	temperature?: string | number
 }
 
 /** An LLDP neighbour, from `/lldp_remote_devices` */

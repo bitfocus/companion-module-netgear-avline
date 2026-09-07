@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fixed
+  - Read SFP temperature and physical port numbers from M4250/M4350 fiber-optics responses
+  - Keep the last SFP variables when the switch intermittently reports `FiberOptics not found`
+
 ## v2.0.0
 
 - Changed
