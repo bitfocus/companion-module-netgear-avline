@@ -1,6 +1,7 @@
 import { combineRgb, type CompanionFeedbackDefinitions } from '@companion-module/base'
 import { fibrePortField, poePortField, portField, vlanField } from './fields.js'
-import { fibreModules, type ModuleInstance } from './main.js'
+import { fibreModules } from './fiber.js'
+import type { ModuleInstance } from './main.js'
 
 export function getFeedbackDefinitions(self: ModuleInstance): CompanionFeedbackDefinitions {
 	const ColorGreen = combineRgb(0, 200, 0)

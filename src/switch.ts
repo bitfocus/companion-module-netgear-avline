@@ -12,7 +12,6 @@ import type {
 	PoePortConfig,
 	FiberOptic,
 	FiberOpticsResponse,
-	RawFiberOptic,
 	LldpRemoteDevice,
 	LldpRemoteDevicesResponse,
 	PortConfig,
@@ -22,6 +21,7 @@ import type {
 	VlanMembership,
 	VlanMembershipResponse,
 } from './types.js'
+import { normaliseFiberOptic } from './fiber.js'
 
 export type SwitchLogger = (level: LogLevel, message: string) => void
 
@@ -630,26 +630,6 @@ class NetgearM4250 {
 		const json = await this.request<DeviceInfoResponse>('device_info')
 		return json.deviceInfo
 	}
-}
-
-/**
- * M4250/M4350 firmware uses `temperature`, while older API documentation used `temp`.
- * It also reports both a numeric physical port and a family-specific interface name. Variable
- * ids deliberately use the physical port so `1/0/20` consistently becomes `sfp_20_*`.
- */
-function normaliseFiberOptic(module: RawFiberOptic): FiberOptic | null {
-	const port = module.port ?? module.portName?.split('/').at(-1)
-	if (port === undefined || port === '') return null
-
-	return {
-		...module,
-		port: String(port),
-		temp: module.temp === undefined ? valueAsString(module.temperature) : valueAsString(module.temp),
-	}
-}
-
-function valueAsString(value: string | number | null | undefined): string | undefined {
-	return value === undefined || value === null ? undefined : String(value)
 }
 
 /**

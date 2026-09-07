@@ -1,11 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Fixed
-  - Read SFP temperature and physical port numbers from M4250/M4350 fiber-optics responses
-  - Keep the last SFP variables when the switch intermittently reports `FiberOptics not found`
-
 ## v2.0.0
 
 - Changed
@@ -27,6 +21,7 @@
     info, per-sensor temperature, and per-SFP-module diagnostics
   - Presets: per-port and switch-wide status read-outs, grouped under text headers, plus
     presets for the new port-enable, VLAN, and save/reboot actions
+  - Test coverage reporting and CI enforcement
 - Fixed
   - Port Enabled and Port VLAN feedbacks now refresh when the port configuration changes on the
     switch itself, instead of only after the module writes to a port
