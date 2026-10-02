@@ -44,6 +44,9 @@ const LOGOUT_TIMEOUT_MS = 1500
  */
 const KEEP_ALIVE_TIMEOUT_MS = 30 * 1000
 
+/** Consecutive rejections of a previously working optional endpoint before it is reported as gone */
+const REJECTIONS_BEFORE_WARNING = 3
+
 export type VlanPortMembership = 'tagged' | 'untagged' | 'excluded'
 
 /** Collapse a list of ports back into ranges for logging: `1-8, 12, 20-21` */
@@ -442,12 +445,17 @@ class NetgearM4250 {
 	 * `fiber_optics` outright, for example – and none of these are worth failing the whole
 	 * connection over. An API-level rejection is reported once and treated as "no data";
 	 * transport failures and rejected tokens still propagate.
+	 *
+	 * Some models also reject an endpoint they normally answer for a poll or two (the M4350
+	 * does this with `fiber_optics`), so an endpoint that used to work is only reported as gone
+	 * once it has stayed gone for a few consecutive polls; a blip shorter than that is a debug line.
 	 */
 	private async optionalRequest<T extends ApiResponseEnvelope>(path: string): Promise<T | null> {
 		try {
 			const json = await this.request<T>(path)
 
 			if (this.unsupported.delete(path)) this.log('info', `Switch is answering ${path} again`)
+			this.rejections.delete(path)
 			this.everSucceeded.add(path)
 
 			return json
@@ -460,14 +468,22 @@ class NetgearM4250 {
 			 * Reported once per transition, at a level reflecting what happened: an endpoint that
 			 * never answered is a missing feature, one that stopped answering is worth a warning.
 			 */
-			if (!this.unsupported.has(path)) {
-				this.unsupported.add(path)
+			if (this.unsupported.has(path)) return null
 
-				if (this.everSucceeded.has(path)) {
-					this.log('warn', `Switch stopped providing ${path}: ${error.message}`)
-				} else {
-					this.log('debug', `Switch does not provide ${path}: ${error.message}`)
-				}
+			if (!this.everSucceeded.has(path)) {
+				this.unsupported.add(path)
+				this.log('debug', `Switch does not provide ${path}: ${error.message}`)
+				return null
+			}
+
+			const rejections = (this.rejections.get(path) ?? 0) + 1
+			this.rejections.set(path, rejections)
+
+			if (rejections >= REJECTIONS_BEFORE_WARNING) {
+				this.unsupported.add(path)
+				this.log('warn', `Switch stopped providing ${path}: ${error.message}`)
+			} else {
+				this.log('debug', `Switch did not answer ${path}, keeping the last data: ${error.message}`)
 			}
 
 			return null
@@ -476,6 +492,9 @@ class NetgearM4250 {
 
 	/** Endpoints that have returned data at least once */
 	private readonly everSucceeded = new Set<string>()
+
+	/** Consecutive rejections of an endpoint that used to answer, per path */
+	private readonly rejections = new Map<string, number>()
 
 	/** Endpoints the switch has rejected, so each is only reported once */
 	private readonly unsupported = new Set<string>()
