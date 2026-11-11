@@ -26,7 +26,18 @@ import { normaliseFiberOptic } from './fiber.js'
 export type SwitchLogger = (level: LogLevel, message: string) => void
 
 const API_PORT = 8443
-const REQUEST_TIMEOUT_MS = 10000
+
+/*
+ * Cap on one connected request. Bulk reads on larger switches have hit 10s, and the poll keeps
+ * only one request in flight, so a stalled reply holds everything up until this fires.
+ */
+const REQUEST_TIMEOUT_MS = 20000
+
+/*
+ * Cap on establishing the connection, so an unreachable port fails as a connection error
+ * rather than looking like a slow reply.
+ */
+const CONNECT_TIMEOUT_MS = 5000
 
 // Log back in this long before the token is due to expire
 const TOKEN_REFRESH_MARGIN_MS = 60 * 1000
@@ -103,7 +114,7 @@ class NetgearM4250 {
 		// The switch serves its API over a self-signed certificate. The keep-alive window is
 		// stretched past undici's 4s default so the slower polls can reuse the connection.
 		this.agent = new Agent({
-			connect: { rejectUnauthorized: false },
+			connect: { rejectUnauthorized: false, timeout: CONNECT_TIMEOUT_MS },
 			keepAliveTimeout: KEEP_ALIVE_TIMEOUT_MS,
 			keepAliveMaxTimeout: KEEP_ALIVE_TIMEOUT_MS,
 		})
@@ -146,6 +157,10 @@ class NetgearM4250 {
 		const lifetime = Number(data.login.expires)
 		this.tokenLifetimeMs = Number.isFinite(lifetime) && lifetime > 0 ? lifetime * 1000 : 0
 		this.loginExpiresAt = this.tokenLifetimeMs > 0 ? Date.now() + this.tokenLifetimeMs : null
+
+		const session =
+			this.tokenLifetimeMs > 0 ? `session lasts ${this.tokenLifetimeMs / 1000}s` : 'session length not reported'
+		this.log('info', `Logged in to ${this.url_or_ip_address}:${API_PORT} as ${this.username}, ${session}`)
 	}
 
 	/**
@@ -237,6 +252,7 @@ class NetgearM4250 {
 
 		let response
 		let responseBody: string
+		let phase: RequestPhase = 'waiting'
 		try {
 			response = await fetch(`https://${this.url_or_ip_address}:${API_PORT}/api/v1/${path}`, {
 				method,
@@ -250,7 +266,16 @@ class NetgearM4250 {
 				body: body === undefined ? undefined : JSON.stringify(body),
 			})
 
+			phase = 'reading'
 			responseBody = await response.text()
+		} catch (error) {
+			throw describeTransportFailure(error, {
+				request: `${method} ${path}`,
+				target: `${this.url_or_ip_address}:${API_PORT}`,
+				phase,
+				timedOut: deadline.signal.aborted,
+				timeoutMs,
+			})
 		} finally {
 			clearTimeout(expiry)
 		}
@@ -651,12 +676,81 @@ class NetgearM4250 {
 	}
 }
 
+/** `waiting` until the response headers arrive, `reading` while the body streams */
+type RequestPhase = 'waiting' | 'reading'
+
 /**
- * Whether a request failed before the switch could answer it. `fetch` reports these as a plain
- * `TypeError`; an expired deadline doesn't count, as the switch was reached, just slowly.
+ * No usable answer from the switch: `network` never reached it, `timeout` connected but ran out the deadline.
+ * Only `network` is retried.
+ */
+class TransportError extends Error {
+	constructor(
+		message: string,
+		readonly kind: 'network' | 'timeout',
+		options?: ErrorOptions,
+	) {
+		super(message, options)
+	}
+}
+
+interface TransportFailureContext {
+	/** `GET sw_portstats?portid=ALL` */
+	request: string
+	/** `host:port` */
+	target: string
+	phase: RequestPhase
+	/** Whether our own request deadline ended the request */
+	timedOut: boolean
+	timeoutMs: number
+}
+
+/**
+ * Says which request failed and how far it got, so an unreachable port reads differently from a
+ * switch that accepted the connection and then went quiet.
+ */
+function describeTransportFailure(error: unknown, context: TransportFailureContext): Error {
+	const { request, target, phase, timedOut, timeoutMs } = context
+	const seconds = `${timeoutMs / 1000}s`
+
+	if (timedOut) {
+		const what = phase === 'reading' ? `reply stalled, incomplete after ${seconds}` : `no reply within ${seconds}`
+		return new TransportError(`${request}: ${what}`, 'timeout', { cause: error })
+	}
+
+	if (!(error instanceof TypeError && error.message.includes('fetch failed'))) {
+		return error instanceof Error ? error : new Error(String(error))
+	}
+
+	const cause = error.cause as { code?: string; message?: string } | undefined
+	const code = cause?.code
+	let what: string
+
+	switch (code) {
+		case 'UND_ERR_CONNECT_TIMEOUT':
+			what = `no connection to ${target} after ${CONNECT_TIMEOUT_MS / 1000}s (port blocked or REST API off?)`
+			break
+		case 'ECONNREFUSED':
+			what = `${target} refused connection (REST API off?)`
+			break
+		case 'EHOSTUNREACH':
+		case 'ENETUNREACH':
+		case 'ENOTFOUND':
+		case 'EAI_AGAIN':
+			what = `${target} unreachable (${code})`
+			break
+		default:
+			what = `connection to ${target} failed (${cause?.message ?? code ?? error.message})`
+	}
+
+	return new TransportError(`${request}: ${what}`, 'network', { cause: error })
+}
+
+/**
+ * Whether a request failed before the switch could answer it. An expired deadline doesn't count:
+ * the connection was made, so the switch was reached, just slowly.
  */
 function isTransportFailure(error: unknown): boolean {
-	return error instanceof TypeError && error.message.includes('fetch failed')
+	return error instanceof TransportError && error.kind === 'network'
 }
 
 /**
@@ -748,4 +842,5 @@ export {
 	PortConfigurationMap,
 	PortPoeConfigurationMap,
 	PortStatsMap,
+	TransportError,
 }
