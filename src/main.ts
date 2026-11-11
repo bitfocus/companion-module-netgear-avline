@@ -16,6 +16,7 @@ import {
 } from './switch.js'
 import { temperatureSensors, type DeviceInfo, type FiberOptic, type LldpRemoteDevice, type PoeConfig } from './types.js'
 import { fiberVariableId, fibreModules } from './fiber.js'
+import { describeConnectFailure, describeError, type ConnectStage } from './errors.js'
 
 /*
  * Only PoE config and port statistics drive feedbacks, so only they are polled fast; the rest is
@@ -196,11 +197,14 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	 * on a timer rather than leaving the connection dead until the user edits its config.
 	 */
 	private async connect(generation: number): Promise<void> {
+		let stage: ConnectStage = 'login'
+
 		try {
 			this.setStatus(InstanceStatus.Connecting, 'Logging in')
 			await this.switch.login()
 			if (generation !== this.generation) return
 
+			stage = 'data'
 			this.setStatus(InstanceStatus.Connecting, 'Refreshing data')
 			await this.fetchSwitchData()
 			if (generation !== this.generation) return
@@ -227,8 +231,9 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		} catch (error) {
 			if (generation !== this.generation) return
 
-			this.log('error', `Unable to connect: ${describeError(error)}`)
-			this.setStatus(InstanceStatus.ConnectionFailure, 'Unable to log in')
+			const { log, status } = describeConnectFailure(stage, error)
+			this.log('error', log)
+			this.setStatus(InstanceStatus.ConnectionFailure, status)
 			this.scheduleNextRun(generation, this.failureBackoff(), true)
 		}
 	}
@@ -633,10 +638,6 @@ function describeFanState(fanState: unknown): string {
 	return fanState
 		.map((fan) => (typeof fan === 'string' ? fan : Object.values(fan as Record<string, string>).join(' ')))
 		.join(', ')
-}
-
-function describeError(error: unknown): string {
-	return error instanceof Error ? error.message : String(error)
 }
 
 export { ModuleInstance }
