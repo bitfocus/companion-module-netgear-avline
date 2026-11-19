@@ -87,7 +87,7 @@ export interface PortConfigResponse extends ApiResponseEnvelope {
 
 export interface SwitchStatsPort {
 	portId: number
-	/** See `speedStatusLevels` */
+	/** A firmware-specific code, see `speed.ts` */
 	speed: number
 	/** `0` = link up, `1` = link down */
 	status: number

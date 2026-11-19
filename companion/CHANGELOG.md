@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.0.1
+
+- Fixed
+  - Port speeds read correctly on newer firmware, which
+    renumbered the speed codes
+  - Requests to slow switches no longer time out: bulk reads on larger switches can take over 10s,
+    so the request timeout is now 20s
+- Changed
+  - Connection errors now say which request failed and why (unreachable, connection refused, no
+    reply, or a reply that stalled)
+
 ## v2.0.0
 
 - Changed

@@ -5,7 +5,8 @@ import { getVariableDefinitions } from './variables.js'
 import { getFeedbackDefinitions } from './feedbacks.js'
 import { upgradeScripts } from './upgrades.js'
 import { getConfigFields, type ModuleConfig, type ModuleSecrets } from './config.js'
-import { poeStatusLevels, speedStatusLevels, temperatureSensorStates } from './constants.js'
+import { poeStatusLevels, temperatureSensorStates } from './constants.js'
+import { detectSpeedTable, guessSpeedTable, speedLabel, type SpeedTable } from './speed.js'
 import {
 	ApiError,
 	NetgearM4250,
@@ -101,6 +102,11 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	/** The fibre ports the published variable definitions were built for */
 	private lastFibrePorts = ''
 
+	/** The speed code table identified from codes the switch reported; it can't change while connected */
+	private speedTableFromCodes: SpeedTable | null = null
+	/** The speed code table the published speed variables were built with */
+	private speedTable: SpeedTable | null = null
+
 	/** The last status pushed to Companion, so an unchanged one isn't re-emitted on every poll */
 	private lastStatus: string | undefined
 
@@ -151,6 +157,7 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		this.poeConfigFetchedAt = 0
 		this.deviceName = undefined
 		this.lastFibrePorts = ''
+		this.speedTable = null
 		this.lastSeen = {
 			poe: '',
 			stats: '',
@@ -198,6 +205,9 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	 */
 	private async connect(generation: number): Promise<void> {
 		let stage: ConnectStage = 'login'
+
+		// Reconnecting may follow a firmware upgrade, which can change the speed codes
+		this.speedTableFromCodes = null
 
 		try {
 			this.setStatus(InstanceStatus.Connecting, 'Logging in')
@@ -373,6 +383,13 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 			})
 
 			this.deviceInfoFetchedAt = now
+		}
+
+		this.speedTableFromCodes ??= detectSpeedTable(ports.map((port) => port.speed))
+		const speedTable = this.speedTableFromCodes ?? guessSpeedTable(this.device_status)
+		if (speedTable !== this.speedTable) {
+			this.speedTable = speedTable
+			changed.stats = true
 		}
 
 		if (now - this.poeConfigFetchedAt >= POE_CONFIG_POLL_INTERVAL_MS) {
@@ -603,7 +620,7 @@ class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 		if (changed.stats) {
 			for (const port of this.port_stats?.all() ?? []) {
 				changedVars[`port_${port.portId}_link_status`] = port.status === 0 ? 'Up' : 'Down'
-				changedVars[`port_${port.portId}_speed`] = speedStatusLevels[port.speed] ?? 'Unknown'
+				changedVars[`port_${port.portId}_speed`] = speedLabel(port.speed, this.speedTable)
 				changedVars[`port_${port.portId}_vlans`] = port.vlans.join(', ')
 			}
 		}
