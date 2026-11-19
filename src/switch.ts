@@ -158,9 +158,11 @@ class NetgearM4250 {
 		this.tokenLifetimeMs = Number.isFinite(lifetime) && lifetime > 0 ? lifetime * 1000 : 0
 		this.loginExpiresAt = this.tokenLifetimeMs > 0 ? Date.now() + this.tokenLifetimeMs : null
 
-		const session =
-			this.tokenLifetimeMs > 0 ? `session lasts ${this.tokenLifetimeMs / 1000}s` : 'session length not reported'
-		this.log('info', `Logged in to ${this.url_or_ip_address}:${API_PORT} as ${this.username}, ${session}`)
+		this.log('info', `Logged in to ${this.url_or_ip_address}:${API_PORT} as ${this.username}`)
+		this.log(
+			'debug',
+			this.tokenLifetimeMs > 0 ? `Session lasts ${this.tokenLifetimeMs / 1000}s` : 'Session length not reported',
+		)
 	}
 
 	/**

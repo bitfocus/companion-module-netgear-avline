@@ -115,7 +115,8 @@ describe('transport failures', () => {
 		await new NetgearM4250('10.0.0.1', 'buttons', 'secret-password', log).login()
 
 		const lines = log.mock.calls.map((call) => String(call[1])).join('\n')
-		expect(log).toHaveBeenCalledWith('info', 'Logged in to 10.0.0.1:8443 as buttons, session lasts 300s')
+		expect(log).toHaveBeenCalledWith('info', 'Logged in to 10.0.0.1:8443 as buttons')
+		expect(log).toHaveBeenCalledWith('debug', 'Session lasts 300s')
 		expect(lines).not.toContain('secret-token')
 		expect(lines).not.toContain('secret-password')
 	})
