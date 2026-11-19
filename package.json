@@ -1,6 +1,6 @@
 {
 	"name": "netgear-avline",
-	"version": "2.0.1-beta.1",
+	"version": "2.0.1",
 	"main": "dist/main.js",
 	"type": "module",
 	"scripts": {
@@ -29,14 +29,14 @@
 	},
 	"devDependencies": {
 		"@companion-module/tools": "^2.9.1",
-		"@types/node": "^22.20.4",
+		"@types/node": "^22.20.5",
 		"@vitest/coverage-v8": "^5.1.0",
 		"eslint": "^9.39.5",
-		"prettier": "^3.9.10",
+		"prettier": "^3.10.1",
 		"rimraf": "^6.1.4",
 		"typescript": "~5.9.3",
-		"typescript-eslint": "^8.72.1",
-		"vite": "^8.3.6",
+		"typescript-eslint": "^8.72.2",
+		"vite": "^8.3.8",
 		"vitest": "^5.1.0"
 	},
 	"prettier": "@companion-module/tools/.prettierrc.json",
